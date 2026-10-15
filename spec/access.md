@@ -1,6 +1,6 @@
 # Access and user isolation
 
-- Each request acts as one provisioned organisation user from an [allowed identity domain](environment.md#domain-restriction); deny unprovisioned users.
+- Each request acts as one active local user admitted through [onboarding](identity.md#onboarding) from an [allowed identity domain](environment.md#domain-restriction); pending/suspended users receive no access.
 - Effective access = enabled services ∩ user/group policy ∩ connection-specific user consent/scopes ∩ current Infomaniak permissions.
 - Shared resources require explicit Infomaniak grants.
 - Filter tool/resource discovery; authorise every operation, including direct IDs, downloads and UI actions.

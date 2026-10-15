@@ -23,7 +23,7 @@ Each module registers with the kernel:
 
 ## Reference implementations
 
-Use these capability references within the shared, per-user architecture:
+Use these tool/provider-call references; authentication follows our [browser-based onboarding](identity.md):
 
 - [Infomaniak Calendar MCP](https://github.com/Infomaniak/mcp-server-calendar)
 - [Infomaniak kDrive MCP](https://github.com/Infomaniak/mcp-server-kdrive)

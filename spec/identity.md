@@ -1,24 +1,34 @@
 # Identity and connections
 
-## SSO and provisioning
+## Sign in with Infomaniak
 
-- SAML 2.0 user/admin SSO through the organisation's IdP; our authentication layer acts as service provider.
-- SCIM 2.0 user/group provisioning, membership changes and deactivation from the same IdP.
-- Stable SAML/SCIM identity mapping; email changes never relink accounts.
+- One organisation-managed application; the administrator configures its client ID/secret once on the server. Employees use browser sign-in/consent.
+- Users/admins authenticate directly through [Infomaniak OAuth2/OIDC](https://www.infomaniak.com/en/support/faq/2567/add-and-manage-infomaniak-api-applications).
+- Use authorisation code + PKCE S256 with `openid profile email`; trust issuer `https://login.infomaniak.com` and its [discovery metadata](https://login.infomaniak.com/.well-known/openid-configuration).
+- Validate OIDC responses; bind local accounts to `(iss, sub)`. Email changes never relink accounts.
+
+## Onboarding
+
+- Automatically create a regular local user after the first login passes the [verified-domain policy](environment.md#domain-restriction); apply administrator-defined default service grants.
+- Support manual approval instead: eligible users remain pending until approved. Both modes use the same identity/domain checks.
+- Administrator roles require explicit assignment; suspended identities remain suspended across subsequent logins.
+- Manage groups and suspension locally. Staff offboarding uses admin suspension until an automatic provider lifecycle integration is verified.
 
 ## Client authentication
 
 - OAuth 2.1 authorisation-code flow, PKCE S256, discovery, compatible client registration and audience-bound tokens.
-- Validate identity/scopes on every request.
+- Authenticate through Infomaniak, then issue separate MCP tokens; validate identity/scopes on every request.
 - Follow [MCP](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization), [ChatGPT](https://developers.openai.com/plugins/build/auth) and [Claude](https://claude.com/docs/connectors/building) requirements.
 
 ## Infomaniak authorisation
 
-- Use each user's authorised Infomaniak API credentials; verify account ownership. Support renewal, reconnection and revocation.
+- Obtain each user's API tokens through delegated authorisation; verify account ownership and automate token exchange/renewal. Support reconnection and revocation.
+- Employees never create API applications or generate, copy or paste personal API keys/tokens.
 - Keep upstream credentials separate from MCP tokens and hidden from clients/tool results.
-- SSO/SCIM grant no API access.
+- Signing in does not itself grant Mail, Calendar or kDrive API access.
 
 ## Before implementation
 
-- Confirm IdP/mappings: Infomaniak [receives SAML/SCIM identity/provisioning](https://www.infomaniak.com/en/support/faq/874/discover-infomaniaks-sso-connection); it is not established as our IdP/SCIM source.
-- Validate application grants, renewal/revocation for `workspace:mail`, `workspace:calendar`, `user_info` and `drive`.
+- Choose the public HTTPS origin. The organisation administrator creates an Infomaniak OAuth/OIDC application supporting server-side authorisation code; register `/auth/infomaniak/callback` under that origin and configure its [client credentials](environment.md).
+- Test two employees through the same application: validated identity claims, independent consent, API isolation and token renewal/revocation. Verify required service scopes: `workspace:mail`, `workspace:calendar`, `user_info`, `drive`.
+- Enable modules only after delegated access is verified. Unsupported grants require a supported provider integration; personal-token entry is not an accepted fallback.

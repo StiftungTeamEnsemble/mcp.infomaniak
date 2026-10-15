@@ -5,6 +5,7 @@
 - Follow the [module contract](spec/module-system.md) when adding or changing services.
 - Keep module tool names, arguments and results explicit; link provider adapters for upstream API calls.
 - Keep deployment variables and domain restrictions in the [environment spec](spec/environment.md).
+- Preserve [browser-based onboarding](spec/identity.md) when changing authentication; employees must never configure API keys.
 - Keep this file concise: agent instructions and links. Document project facts once in `/spec`.
 
 ## Documentation
