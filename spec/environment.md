@@ -6,7 +6,7 @@ Server-side bootstrap. The allowed domain is confirmed; other values illustrate 
 PUBLIC_URL=https://mcp.example.org              # Replace with chosen HTTPS origin
 SQLITE_PATH=/data/mcp.sqlite                   # Persistent database
 CREDENTIAL_ENCRYPTION_KEY=<base64-32-byte-key> # Secret; stored outside SQLite
-INFOMANIAK_CLIENT_ID=<client-id>               # One organisation OAuth/OIDC application
+INFOMANIAK_CLIENT_ID=<client-id>               # Organisation application for this environment
 INFOMANIAK_CLIENT_SECRET=<client-secret>       # Configure once on the server
 ALLOWED_EMAIL_DOMAINS=team-ensemble.ch          # Comma-separated login domains
 ```
@@ -14,6 +14,7 @@ ALLOWED_EMAIL_DOMAINS=team-ensemble.ch          # Comma-separated login domains
 - Replace placeholders; reject missing/invalid values at startup.
 - Keep `.env` out of Git/frontend bundles; retain the encryption key across redeployments.
 - Register the exact `PUBLIC_URL` + `/auth/infomaniak/callback` URL in the [Infomaniak application setup](identity.md#before-implementation).
+- For local integration testing, use the [development tunnel origin and isolated credentials](development.md#local-chatgpt-testing).
 
 ## Domain restriction
 

@@ -2,7 +2,7 @@
 
 ## Sign in with Infomaniak
 
-- One organisation-managed application; the administrator configures its client ID/secret once on the server. Employees use browser sign-in/consent.
+- One organisation-managed application per environment; the administrator configures its client ID/secret once on the server. Employees use browser sign-in/consent.
 - Users/admins authenticate directly through [Infomaniak OAuth2/OIDC](https://www.infomaniak.com/en/support/faq/2567/add-and-manage-infomaniak-api-applications).
 - Use authorisation code + PKCE S256 with `openid profile email`; trust issuer `https://login.infomaniak.com` and its [discovery metadata](https://login.infomaniak.com/.well-known/openid-configuration).
 - Validate OIDC responses; bind local accounts to `(iss, sub)`. Email changes never relink accounts.

@@ -1,6 +1,6 @@
 # Agent instructions
 
-- Read the [spec index](spec/README.md) and [development context](spec/development.md) before work.
+- Read the [spec index](spec/README.md) and [development context](spec/development.md), including [local integration testing](spec/development.md#local-chatgpt-testing), before work.
 - Follow the [coding and implementation principles](spec/coding-style.md) for security, reliability, scope, logging and reuse.
 - Follow the [module contract](spec/module-system.md) when adding or changing services.
 - Keep module tool names, arguments and results explicit; link provider adapters for upstream API calls.
