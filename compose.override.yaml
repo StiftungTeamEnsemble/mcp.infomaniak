@@ -1,0 +1,5 @@
+# Local-only: Docker Compose merges this automatically; Coolify and other proxies use compose.yaml alone.
+services:
+  mcp:
+    ports:
+      - "127.0.0.1:3000:3000"

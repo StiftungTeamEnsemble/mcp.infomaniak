@@ -24,7 +24,7 @@ Compose inputs: `to`, `subject`, plain-text `body`; optional `cc`, `bcc`, `in_re
 
 - `mail_send_email`: compose inputs plus `attachments[]?` → send outcome.
 - `mail_create_draft`: compose inputs → `uuid`, `uid`, `resolved_from`, optional `warnings`.
-- `mail_list_drafts()` → draft threads and identifiers.
+- `mail_list_drafts(limit=50, offset=0)` → draft threads and identifiers.
 - `mail_update_draft(draft_uuid, to?, subject?, body?, cc?, bcc?, attachments[]?)` → updated draft.
 - `mail_send_draft(draft_uuid, delay=0)` → send/scheduled outcome; delay is seconds.
 - `mail_delete_draft(draft_uuid)` → deletion outcome.
@@ -40,7 +40,13 @@ Compose inputs: `to`, `subject`, plain-text `body`; optional `cc`, `bcc`, `in_re
 ## Behaviour
 
 - Preserve mailbox/folder/message/thread identity. Thread summaries retain `thread_uid`, `first_message_uid`, folder identity and state. Bulk `message_ids[]` are nonempty, folder-scoped message UIDs.
+- Listing identities must be usable and consistent across scoped UIDs, folder fields and any returned mailbox identity. Global-search results require their actual folder; the query's Inbox base is not a result identity. A draft thread without messages may retain a null first-message UID.
+- Read/reply-source results must identify the requested message; validate any returned folder/mailbox identity before returning content or composing a reply. Accept numeric and folder-scoped provider UIDs without losing identity.
+- Created folders require usable IDs; malformed responses report uncertainty with the parent-folder recovery context.
+- Message searches, message lists and draft lists return `has_more` and `next_offset`; continue with the same filters and that `offset`. Page limits are 1–100; offsets are nonnegative safe JSON integers, and returned continuation offsets must be accepted unchanged.
 - Reply formats: `in_reply_to` is a Message-ID; `in_reply_to_uid` is `UID@folder_id`; `references` contains space-separated Message-IDs.
 - Attachments use [user-scoped transfers](../mcp.md), preserving filenames/MIME types.
+- Validate all attachment content and header metadata before provider writes, including reused recipients, sender/reply headers and attachment metadata; reject header control characters while allowing multiline bodies. Validate provider identifiers before constructing paths; malformed upload identifiers report uncertainty. Failed multi-step sends/updates identify the known draft and completed attachment uploads.
 - Draft editing never sends; accessible drafts survive reconnections/restarts. Omitted update fields retain their values.
-- Return effective sending identity, provider fallback warnings and actual send/scheduled outcome.
+- Draft reads require the requested UUID; validate any returned mailbox identity on reads, creation and mutations. Mutation acknowledgements must be objects and may omit UUIDs, but returned UUIDs must be usable and match the requested draft. Invalid mutation identities report uncertainty with known and safe returned draft IDs.
+- Return effective sending identity, provider fallback warnings and actual send/scheduled outcome. Sending-identity lookup authorisation failures require reconnection or access correction before any write.

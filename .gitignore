@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+/target/
+/node_modules/
+/web/dist/
+/data/
+/test-results/
+/playwright-report/
+*.sqlite*
+*.db*

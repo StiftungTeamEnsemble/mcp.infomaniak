@@ -4,8 +4,15 @@
 - Follow the [coding and implementation principles](spec/coding-style.md) for security, reliability, scope, logging and reuse.
 - Follow the [module contract](spec/module-system.md) when adding or changing services.
 - Keep module tool names, arguments and results explicit; link provider adapters for upstream API calls.
-- Keep deployment variables and domain restrictions in the [environment spec](spec/environment.md).
+- Keep deployment variables and domain restrictions in the [environment spec](spec/environment.md). Keep `compose.yaml` platform-portable (Coolify uses it alone); local-only settings belong in `compose.override.yaml`.
 - Preserve [browser-based onboarding](spec/identity.md) when changing authentication; employees must never configure API keys.
+- Keep [verification status](spec/development.md#verification-status) current; provider mocks never satisfy the two-employee or real-client integration prerequisites.
+- Verify continuation through actual tool/resource inputs, including schema bounds, and recheck the exact client token or browser session after asynchronous credential renewal; cover both with integration regressions in `test/`.
+- Preserve [transport authorisation errors and explicit mutation outcomes](spec/mcp.md#behaviour-and-results); record safe recovery context before every module write, including across tool deadlines. Never hide known provider limitations behind successful results.
+- Apply [newly validated identity claims](spec/environment.md#domain-restriction) to existing access checks, including after credential renewal.
+- Validate provider-returned identifiers before constructing paths and reused mail header/attachment metadata before uploads; preserve authorisation failures from sending-identity lookup. Check [Mail listing/message/draft identities](spec/modules/mail.md#behaviour) against the returned/requested objects and mailbox; never infer global-search folders from the query base. Retain safe returned draft IDs for uncertain mutations.
+- Check [kDrive result identities](spec/modules/kdrive.md#behaviour) against the requested file/drive before downloads or discovery caching; validate file-mutation acknowledgements even when IDs are omitted and retain safe returned IDs for recovery.
+- Validate [Calendar result identities](spec/modules/calendar.md#behaviour), including deletion acknowledgements, and reject incomplete lists; preserve known event IDs when a mutation result is uncertain.
 - Keep this file concise: agent instructions and links. Document project facts once in `/spec`.
 
 ## Documentation

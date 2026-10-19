@@ -11,7 +11,8 @@
 - Namespaced tools; typed inputs/results; accurate read/write, destructive and external-effect annotations.
 - Bounded lists/searches; continuation when incomplete.
 - Distinct reconnection, access-denied and provider errors.
-- Report partial/uncertain mutations; never silently repeat non-idempotent actions.
+- MCP authorisation failures use HTTP 401/403, including upstream reconnection failures (403). Missing client scopes return a Bearer `insufficient_scope` challenge naming the required scope and resource metadata; local policy denials and upstream reconnection failures do not request more client consent.
+- Report partial/uncertain mutations with known object IDs, failed phase and progress in text and safe error metadata, including after operation deadlines. Authorisation failures retain that recovery context alongside their HTTP error. Never silently repeat non-idempotent actions. An unreadable or oversized response after a write is an uncertain outcome.
 - Stable object IDs, meaningful summaries, source links where available; concise text alongside structured results.
 - Binary content: typed MCP content/resources or authenticated user-scoped transfers; no arbitrary server paths.
 - Mail/event/file cards with source navigation through supported MCP Apps, inspired by [Twenty](https://github.com/twentyhq/twenty/pull/26179). Follow [ChatGPT's UI contract](https://developers.openai.com/plugins/concepts/plugins#optional-ui).

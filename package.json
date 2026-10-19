@@ -1,0 +1,16 @@
+{
+  "name": "ensemble-mcp-ui",
+  "private": true,
+  "scripts": {
+    "build": "esbuild web/app.jsx --bundle --minify --outfile=web/dist/app.js --define:process.env.NODE_ENV=\"'production'\"",
+    "test": "node --test test/*.test.mjs && playwright test --config=test/playwright.config.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "esbuild": "0.28.2"
+  }
+}

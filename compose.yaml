@@ -1,0 +1,32 @@
+services:
+  mcp:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 100s
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?}
+      INFOMANIAK_CLIENT_ID: ${INFOMANIAK_CLIENT_ID:?}
+      INFOMANIAK_CLIENT_SECRET: ${INFOMANIAK_CLIENT_SECRET:?}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:?}
+      BIND_ADDR: 0.0.0.0:3000
+      SQLITE_PATH: /data/mcp.sqlite
+    expose:
+      - "3000"
+    volumes:
+      - mcp-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mcp-data:

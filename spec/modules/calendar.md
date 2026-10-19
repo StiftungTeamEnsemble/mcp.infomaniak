@@ -21,3 +21,5 @@ Baseline: [tools](https://github.com/Infomaniak/mcp-server-calendar#tools), [sch
 - Partial updates preserve omitted fields, including attendees, alarms, attachments and room data.
 - Project extension: recurring updates/deletes require `recurrence_scope=series|occurrence`; reject unsupported occurrence operations.
 - Return event identity/timezone and notification outcomes; list/get include `bookable_resource_name` when present.
+- Validate event IDs and any returned calendar identity against the requested objects. Malformed creation/update results report uncertainty with known event/calendar IDs and mutation phase. Explicitly incomplete or oversized lists require a narrower interval rather than reporting complete results.
+- Deletion acknowledgements must be objects and may omit identities; any returned event/calendar identity must match the requested objects. Malformed acknowledgements report uncertainty with known and safe returned event IDs.
