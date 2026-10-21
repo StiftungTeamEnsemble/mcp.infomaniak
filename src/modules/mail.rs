@@ -749,7 +749,8 @@ pub fn attachment_filename(disposition: &str) -> Option<String> {
     }
     fallback
 }
-async fn create_draft(c: &Call, mailbox: &Value, base: &str) -> Result<Value> {
+/// Returns the created draft and the exact payload the provider accepted for it.
+async fn create_draft(c: &Call, mailbox: &Value, base: &str) -> Result<(Value, Value)> {
     let args = &c.args;
     let address = mailbox["email"]
         .as_str()
@@ -921,7 +922,7 @@ async fn create_draft(c: &Call, mailbox: &Value, base: &str) -> Result<Value> {
             Method::POST,
             format!("{base}/draft"),
             &[],
-            Some(payload),
+            Some(payload.clone()),
         )
         .await?;
     let mut draft = draft_metadata(
@@ -932,7 +933,49 @@ async fn create_draft(c: &Call, mailbox: &Value, base: &str) -> Result<Value> {
     )?;
     draft["resolved_from"] = json!({"email":effective,"name":if display.is_empty(){Value::Null}else{json!(display)},"identity_id":identity["id"]});
     draft["warnings"] = json!(warnings);
-    Ok(draft)
+    Ok((draft, payload))
+}
+/// Reduce a provider draft read to the writable payload the provider's own client sends.
+fn editable_draft(read: &Value) -> Result<Value> {
+    let invalid = || Error::new(502, "provider_error", "Draft cannot be resent unchanged");
+    let person = |p: &Value| -> Result<Value> {
+        let p = p.as_array().and_then(|a| a.first()).unwrap_or(p);
+        if p.is_null() {
+            return Ok(Value::Null);
+        }
+        Ok(
+            json!({"id":p.get("id").cloned().unwrap_or(Value::Null),"email":p["email"].as_str().ok_or_else(invalid)?,"name":p["name"].as_str().unwrap_or("")}),
+        )
+    };
+    let people = |v: &Value| -> Result<Value> {
+        match v.as_array() {
+            None => Ok(Value::Null),
+            Some(list) if list.is_empty() => Ok(Value::Null),
+            Some(list) => list
+                .iter()
+                .map(|p| Ok(json!({"name":p["name"].as_str().unwrap_or(""),"email":p["email"].as_str().ok_or_else(invalid)?})))
+                .collect::<Result<Vec<_>>>()
+                .map(Value::from),
+        }
+    };
+    // Never drop an attachment silently: every entry needs an upload UUID.
+    let attachments = read["attachments"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .map(|a| {
+                    a.as_str()
+                        .or_else(|| a["uuid"].as_str())
+                        .map(|id| json!(id))
+                        .ok_or_else(invalid)
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(
+        json!({"uuid":read["uuid"],"uid":read["uid"],"subject":read["subject"],"body":read["body"],"quote":read.get("quote").cloned().unwrap_or(Value::Null),"mime_type":read["mime_type"].as_str().unwrap_or("text/html"),"from":person(&read["from"])?,"reply_to":person(&read["reply_to"])?,"to":people(&read["to"])?,"cc":people(&read["cc"])?,"bcc":people(&read["bcc"])?,"references":read["references"].as_str().unwrap_or(""),"in_reply_to":read.get("in_reply_to").cloned().unwrap_or(Value::Null),"in_reply_to_uid":read.get("in_reply_to_uid").cloned().unwrap_or(Value::Null),"forwarded_uid":read.get("forwarded_uid").cloned().unwrap_or(Value::Null),"attachments":attachments,"identity_id":read.get("identity_id").cloned().unwrap_or(Value::Null),"ack_request":read["ack_request"].as_bool().unwrap_or(false),"st_uuid":read.get("st_uuid").cloned().unwrap_or(Value::Null),"resource":null,"priority":read["priority"].as_str().unwrap_or("normal"),"encrypted":false,"encryption_password":"","event_poll_uuid":null,"action":"save","delay":0}),
+    )
 }
 fn draft_metadata(
     value: Value,
@@ -1234,14 +1277,14 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
             };
             return Ok(out);
         }
-        "create_draft" => return Ok(result(create_draft(&c, mailbox, &base).await?, context)),
+        "create_draft" => return Ok(result(create_draft(&c, mailbox, &base).await?.0, context)),
         "send_email" => {
-            let draft = create_draft(&c, mailbox, &base).await?;
+            // Send the composed payload the provider just accepted, as its own client does.
+            let (draft, mut payload) = create_draft(&c, mailbox, &base).await?;
             let draft_uuid = text(&draft, "uuid")?;
-            draft_progress(&c, draft_uuid, "read_created_draft", 0)?;
-            let mut payload = read_draft(&c, &base, uuid, draft_uuid)
-                .await
-                .map_err(|e| draft_failure(e, draft_uuid, "read_created_draft"))?;
+            payload["uuid"] = json!(draft_uuid);
+            payload["uid"] = draft.get("uid").cloned().unwrap_or(Value::Null);
+            payload["resource"] = json!(format!("/api/mail/{uuid}/draft/{draft_uuid}"));
             if args.get("attachments").is_some() {
                 payload["attachments"] = json!(
                     attachments(&c, &base, draft_uuid, uploads)
@@ -1279,7 +1322,7 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
             let draft = text(args, "draft_uuid")?;
             let url = format!("{base}/draft/{}", segment(draft));
             // Read from the provider, never a process-local cache, so drafts survive reconnection/restart.
-            let mut payload = read_draft(&c, &base, uuid, draft).await?;
+            let mut payload = editable_draft(&read_draft(&c, &base, uuid, draft).await?)?;
             for key in ["to", "cc", "bcc"] {
                 if let Some(raw) = args[key].as_str() {
                     payload[key] = recipients(raw)?;

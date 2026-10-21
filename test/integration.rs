@@ -1545,7 +1545,7 @@ async fn reused_draft_headers_and_attachment_metadata_are_checked_before_uploads
     let saved = &mock.calls.iter().find(|c| c.0 == "PUT").unwrap().3;
     assert_eq!(saved["body"], draft["body"]);
     assert_eq!(saved["to"], draft["to"]);
-    assert_eq!(saved["attachments"], draft["attachments"]);
+    assert_eq!(saved["attachments"], json!(["old"]));
 }
 
 #[tokio::test]
@@ -1616,7 +1616,7 @@ async fn invalid_attachments_are_rejected_before_any_provider_write() {
 async fn failed_send_reports_the_created_draft_and_original_failure() {
     for (method, status, code, cause) in [
         (
-            "GET",
+            "PUT",
             StatusCode::UNAUTHORIZED,
             "reconnection_required",
             "reconnection_required",
@@ -2381,7 +2381,7 @@ async fn malformed_draft_creation_is_uncertain_and_is_never_followed_by_a_send()
 }
 #[tokio::test]
 async fn draft_reads_validate_mailbox_identity_before_uploads_or_sending() {
-    for name in ["mail_update_draft", "mail_send_draft", "mail_send_email"] {
+    for name in ["mail_update_draft", "mail_send_draft"] {
         let h = Harness::new().await;
         h.mock.lock().unwrap().responses.insert(
             "GET /mail/box-a/draft/draft-1".into(),
@@ -2544,25 +2544,66 @@ async fn draft_mutation_acknowledgements_may_omit_identities() {
 }
 
 #[tokio::test]
-async fn unreadable_created_drafts_retain_the_known_draft_without_sending() {
+async fn sent_emails_reuse_the_accepted_draft_payload_and_report_provider_rejections() {
     let h = Harness::new().await;
-    h.mock
-        .lock()
-        .unwrap()
-        .responses
-        .insert("GET /mail/box-a/draft/draft-1".into(), json!({"data":[]}));
     let out = h
         .call(
             "mail_send_email",
             json!({"to":"person@example.org","subject":"Subject","body":"Private body"}),
         )
         .await;
-    assert_eq!(out["result"]["_meta"]["error_code"], "partial_mutation");
+    assert_eq!(out["result"]["isError"], false, "{out}");
+    {
+        let mock = h.mock.lock().unwrap();
+        assert!(
+            !mock
+                .calls
+                .iter()
+                .any(|c| c.0 == "GET" && c.1.contains("/draft/"))
+        );
+        let created = &mock.calls.iter().find(|c| c.0 == "POST").unwrap().3;
+        let sent = &mock.calls.iter().find(|c| c.0 == "PUT").unwrap().3;
+        for key in ["subject", "body", "to", "from", "mime_type", "identity_id"] {
+            assert_eq!(sent[key], created[key], "{key}");
+        }
+        assert_eq!(sent["action"], "send");
+        assert_eq!(sent["uuid"], "draft-1");
+        assert_eq!(sent["uid"], "1");
+        assert_eq!(sent["resource"], "/api/mail/box-a/draft/draft-1");
+    }
+    let h = Harness::new().await;
+    h.mock.lock().unwrap().queued_responses.insert(
+        "PUT /mail/box-a/draft/draft-1".into(),
+        [(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({"result":"error","error":{"code":"validation_failed","description":"Private detail"}}),
+        )]
+        .into(),
+    );
+    let out = h
+        .call(
+            "mail_send_email",
+            json!({"to":"person@example.org","subject":"Subject","body":"Private body"}),
+        )
+        .await;
     let context = &out["result"]["_meta"]["error_context"];
+    assert_eq!(out["result"]["_meta"]["error_code"], "partial_mutation");
     assert_eq!(context["draft_uuid"], "draft-1");
-    assert_eq!(context["phase"], "read_created_draft");
-    assert_eq!(context["cause"], "provider_error");
-    assert!(!h.mock.lock().unwrap().calls.iter().any(|c| c.0 == "PUT"));
+    assert_eq!(context["progress"]["provider_status"], 422);
+    assert_eq!(context["progress"]["provider_code"], "validation_failed");
+    assert!(!out.to_string().contains("Private detail"));
+    let outcome = h
+        .app
+        .store
+        .with(|c| {
+            Ok(c.query_row(
+                "SELECT outcome FROM logs WHERE action='mail_send_email'",
+                [],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(outcome, "partial_mutation (provider 422 validation_failed)");
 }
 #[tokio::test]
 async fn upload_validates_exclusive_content_and_handles_empty_text() {

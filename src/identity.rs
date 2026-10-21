@@ -143,7 +143,8 @@ impl Provider {
                     "provider_error"
                 },
                 "Provider rejected the operation; verify any mutation outcome before repeating",
-            ));
+            )
+            .with_context(provider_rejection(status.as_u16(), response).await));
         }
         if response
             .content_length()
@@ -662,6 +663,31 @@ pub async fn callback(
             .map_err(|_| Error::internal())?,
     );
     Ok(response)
+}
+
+/// Safe diagnostics only: the status and the provider's machine-readable error code, never descriptions or bodies.
+async fn provider_rejection(status: u16, mut response: reqwest::Response) -> Value {
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if bytes.len() + chunk.len() > 65536 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let code = serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|v| {
+            v.pointer("/error/code")
+                .or_else(|| v.get("error"))
+                .and_then(Value::as_str)
+                .map(String::from)
+        })
+        .filter(|c| {
+            c.len() <= 64
+                && c.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_.-:".contains(&b))
+        });
+    json!({"provider_status":status,"provider_code":code})
 }
 
 pub fn binary(uri: String, filename: String, mime: String, bytes: Vec<u8>) -> Value {

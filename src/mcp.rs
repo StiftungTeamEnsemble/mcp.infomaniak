@@ -174,7 +174,12 @@ pub async fn handle(State(app): State<App>, headers: HeaderMap, body: Bytes) -> 
                 Some(actor.user.id),
                 Some(&actor.client),
                 name,
-                executed.as_ref().map(|_| "ok").unwrap_or_else(|e| e.code),
+                &match &executed {
+                    Ok(_) => "ok".into(),
+                    Err(e) => e
+                        .provider_detail()
+                        .map_or_else(|| e.code.to_owned(), |d| format!("{} ({d})", e.code)),
+                },
             )?;
             app.store.with(|db| {
                 db.execute(

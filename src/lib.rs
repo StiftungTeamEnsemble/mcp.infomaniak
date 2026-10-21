@@ -31,9 +31,31 @@ impl Error {
             context: None,
         }
     }
+    /// Merges object contexts so provider diagnostics survive added recovery details.
     pub fn with_context(mut self, context: serde_json::Value) -> Self {
-        self.context = Some(context);
+        self.context = match (self.context.take(), context) {
+            (Some(serde_json::Value::Object(mut old)), serde_json::Value::Object(new)) => {
+                old.extend(new);
+                Some(serde_json::Value::Object(old))
+            }
+            (_, context) => Some(context),
+        };
         self
+    }
+    /// Audit-safe provider rejection summary found anywhere in the context.
+    pub fn provider_detail(&self) -> Option<String> {
+        fn find(v: &serde_json::Value) -> Option<String> {
+            let o = v.as_object()?;
+            if let Some(status) = o.get("provider_status").and_then(|s| s.as_u64()) {
+                let code = o
+                    .get("provider_code")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("-");
+                return Some(format!("provider {status} {code}"));
+            }
+            o.values().find_map(find)
+        }
+        find(self.context.as_ref()?)
     }
     pub fn internal() -> Self {
         Self::new(
