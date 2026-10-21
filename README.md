@@ -1,4 +1,4 @@
-# Ensemble MCP
+# Team Ensemble MCP
 
 Organisation-operated Rust service for Infomaniak Mail, Calendar and kDrive, with a React connection and administration portal. Requirements are in [spec](spec/README.md).
 

@@ -2,6 +2,8 @@ import React, {useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 
 function connectionHealth(c){return ({reconnection_required:'Reconnect required',access_denied:'Access denied',provider_unavailable:'Provider unavailable',provider_error:'Provider needs attention',mutation_uncertain:'Check the last operation'})[c.health]||'Connection needs attention'}
+// Team Ensemble signet (ci.team-ensemble.ch/assets/signets/Team-Ensemble-Signet.svg) on a white circle.
+function Signet(){return <svg className="signet" viewBox="0 0 642 642" aria-hidden="true"><circle cx="321" cy="321" r="321" fill="#fff"/><path fill="#000" d="M508.474 456.603C432.285 393.119 286 274.783 286 218.409C286 196.57 301.238 179.302 320.54 179.302C336.794 179.302 350 196.57 350 218.409C350 243.803 308.349 275.291 295.143 287.988C248.921 330.142 231.144 360.614 231.144 398.705C231.144 446.446 280.921 485.044 342.381 486.06C451.078 484.537 537.935 396.674 537.935 288.496C537.935 180.318 442.951 90.4236 324.095 90.4236C198.128 90.4236 98.0657 188.444 98.0657 312.366C98.0657 445.43 204.223 551.576 337.809 551.576V525.167C223.525 525.167 132.605 431.209 132.605 312.366C132.605 203.172 217.43 116.833 324.095 116.833C424.158 116.833 503.395 193.015 503.395 288.496C503.395 383.977 431.777 458.127 342.381 459.651C299.207 458.635 265.683 431.717 265.683 398.705C265.683 365.693 279.905 342.839 318.508 307.287C333.746 293.067 384.539 254.468 384.539 218.409C384.539 182.349 356.603 152.893 320.54 152.893C281.937 152.893 251.461 181.842 251.461 218.409C251.461 284.941 406.888 410.894 486.125 476.918L508.474 456.603Z"/></svg>}
 function App(){
   const [me,setMe]=useState(null),[loaded,setLoaded]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[tab,setTab]=useState('connections'),[admin,setAdmin]=useState(null),[consent,setConsent]=useState(null),[selected,setSelected]=useState([]),[busy,setBusy]=useState(false);
   const flow=new URLSearchParams(location.search).get('authorize');
@@ -22,7 +24,7 @@ function App(){
   async function act(fn){setBusy(true);setError('');try{await fn()}catch(e){setError(e.message)}finally{setBusy(false)}}
   async function mutate(path,body={}){const out=await api(path,body);if(out.redirect){location.assign(out.redirect);return}if(out.upstream_revocation)setNotice(out.upstream_revocation);await load();}
   async function change(body){await api('/api/admin',body);setAdmin(await api('/api/admin'));await load();}
-  const brand=<div className="brand"><span>e</span><strong>ENSEMBLE</strong></div>;
+  const brand=<div className="brand"><Signet/><strong>Team Ensemble</strong></div>;
   if(!loaded)return <main><p className="muted">Loading your connections…</p></main>;
   if(!me)return <main className="login">{brand}<div className="card"><div className="eyebrow">Your organisation · Your access</div><h1>A connection to your work.</h1><p className="muted">Connect your Infomaniak services to ChatGPT and Claude. You decide which services each client can use.</p>{error&&<p role="alert" className="error">{error}</p>}<a className="button primary" href={'/auth/login'+(flow?'?authorize='+encodeURIComponent(flow):'')}>Sign in with Infomaniak ↗</a><p className="muted section-gap">Use your verified organisation account. Your administrator manages access.</p></div></main>;
   return <div className="shell"><aside className="sidebar">{brand}<button className={'nav '+(tab==='connections'?'active':'')} onClick={()=>setTab('connections')}>◉ &nbsp; Connections</button>{me.user.admin&&<button className={'nav '+(tab==='admin'?'active':'')} onClick={()=>setTab('admin')}>⊞ &nbsp; Administration</button>}<small>Organisation services<br/>Connected with care.</small></aside><main><header><div><div className="eyebrow">Organisation workspace</div><h1>{tab==='admin'?'Administration':'Your connections'}</h1><p className="muted subtitle">{tab==='admin'?'Manage service availability, people and permissions.':'Your Infomaniak services, available in the assistants you use.'}</p></div><div className="stack"><span className="userline">{me.user.name||me.user.email}</span><button disabled={busy} onClick={()=>act(async()=>{await api('/api/logout',{});setMe(null)})}>Sign out</button></div></header>
@@ -37,17 +39,18 @@ function App(){
 }
 
 const TOKEN_PAGE='https://manager.infomaniak.com/v3/ng/accounts/token/list';
+// Exact values for the Infomaniak token form, matching its German labels.
+const TOKEN_FIELDS=[['Name des Tokens','MCP Server Team Ensemble'],['Anwendung','Standardanwendung'],['Scopes','Alle'],['Gültigkeitsdauer','Unbegrenzt'],['Beschreibung','leer lassen']];
 function TokenSetup({modules,connected,busy,act,api,load,setNotice}){
-  const [token,setToken]=useState(''),[copied,setCopied]=useState(false);
+  const [token,setToken]=useState(''),[open,setOpen]=useState(false);
   const usable=modules.filter(m=>m.enabled&&m.level);
   if(!usable.length)return null;
-  const scopes=[...new Set(usable.flatMap(m=>m.scopes||[]))];
-  async function copy(){try{await navigator.clipboard.writeText(scopes.join(' '));setCopied(true)}catch{setCopied(false)}}
-  async function save(e){e.preventDefault();await act(async()=>{const out=await api('/api/token',{token});setToken('');const names=usable.filter(m=>out.connected.includes(m.id)).map(m=>m.name);setNotice('Connected: '+names.join(', ')+'. Your token is stored encrypted and never shown to assistants.');await load()})}
-  return <section className="card token-setup"><div className="eyebrow">{connected?'Replace your token':'One-time setup · about two minutes'}</div><h2>{connected?'Update your Infomaniak API token':'Connect your Infomaniak account'}</h2>
+  async function save(e){e.preventDefault();await act(async()=>{const out=await api('/api/token',{token});setToken('');setOpen(false);const names=usable.filter(m=>out.connected.includes(m.id)).map(m=>m.name);setNotice('Connected: '+names.join(', ')+'. Your token is stored encrypted and never shown to assistants.');await load()})}
+  if(connected&&!open)return <section className="card token-setup collapsed"><div><h2>Infomaniak API token saved</h2><p className="muted">Your services are connected with your personal token.</p></div><button onClick={()=>setOpen(true)}>Show token setup</button></section>;
+  return <section className="card token-setup"><div className="card-title"><div><div className="eyebrow">{connected?'Replace your token':'One-time setup · about two minutes'}</div><h2>{connected?'Replace your Infomaniak API token':'Connect your Infomaniak account'}</h2></div>{connected&&<button onClick={()=>setOpen(false)}>Hide</button>}</div>
     <ol className="steps">
-      <li><strong>Open your API tokens in Infomaniak.</strong> <a className="button" href={TOKEN_PAGE} target="_blank" rel="noopener noreferrer">Open Infomaniak tokens ↗</a></li>
-      <li><strong>Create a token</strong> named <em>Ensemble MCP</em>, choose an expiry you are comfortable with and select these scopes:<div className="scopes">{scopes.map(s=><code key={s}>{s}</code>)}<button type="button" className="small-button" onClick={copy}>{copied?'Copied':'Copy list'}</button></div></li>
+      <li><strong>Open your API tokens in Infomaniak</strong> and start creating a new token. <a className="button" href={TOKEN_PAGE} target="_blank" rel="noopener noreferrer">Open Infomaniak tokens ↗</a></li>
+      <li><strong>Fill in the form exactly like this:</strong><table className="token-fields"><tbody>{TOKEN_FIELDS.map(([field,value])=><tr key={field}><th>{field}</th><td>{field==='Beschreibung'?<span className="muted">{value}</span>:<strong>{value}</strong>}</td></tr>)}</tbody></table>Then create the token and copy it. Infomaniak shows it only once.</li>
       <li><strong>Paste the token here.</strong> We check that it belongs to you and connect {usable.map(m=>m.name).join(', ')}.</li>
     </ol>
     <form className="form" onSubmit={save}><label className="wide-field">Infomaniak API token<input type="password" autoComplete="off" spellCheck={false} value={token} onChange={e=>setToken(e.target.value)} placeholder="Paste your token" maxLength={512} required/></label><button className="primary" disabled={busy||!token.trim()}>Save and connect</button></form>

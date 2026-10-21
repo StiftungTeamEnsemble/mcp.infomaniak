@@ -23,7 +23,7 @@
 ## Infomaniak authorisation
 
 - Decision 2026-10-21: Infomaniak OAuth applications only grant sign-in scopes (`openid profile email phone`); API scopes return `invalid_scope` ([developer docs](https://developer.infomaniak.com/getting-started) document API access through personal access tokens). Service access therefore uses one personal API token per employee.
-- Employees create the token in the [Infomaniak Manager](https://manager.infomaniak.com/v3/ng/accounts/token/list) and paste it once in the portal, which links there and lists the scopes required by their enabled, granted services. They never create API applications.
+- Employees create the token in the [Infomaniak Manager](https://manager.infomaniak.com/v3/ng/accounts/token/list) and paste it once in the portal, which links there and shows the exact [form values](interface.md#users). They never create API applications.
 - Accept a token only when `GET /2/profile` succeeds and returns the signed-in user's email (and subject, when an ID is returned); never accept a colleague's token. Store it encrypted per user/service for each enabled, granted service. Provider 401s mark the connection for replacement; tokens have no server-side renewal.
 - Disconnect removes local credentials; the employee deletes the token in Infomaniak to invalidate it upstream.
 - Keep upstream credentials separate from MCP tokens and hidden from clients/tool results.
