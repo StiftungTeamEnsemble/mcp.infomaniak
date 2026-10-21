@@ -14,7 +14,7 @@ services:
     expose:
       - "3000"
     volumes:
-      - mcp-data:/data
+      - /DATA/mcp/infomaniak:/data
     read_only: true
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
@@ -27,6 +27,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  mcp-data:
