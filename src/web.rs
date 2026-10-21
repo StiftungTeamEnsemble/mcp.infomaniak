@@ -76,6 +76,7 @@ pub fn router(app: App) -> Router {
         .route("/api/token", post(save_token))
         .route("/api/disconnect/{module}", post(disconnect))
         .route("/api/clients/{id}/revoke", post(revoke_client))
+        .route("/api/clients/{id}/scopes", post(edit_client))
         .route("/api/authorize", get(consent_view).post(oauth::consent))
         .route("/api/admin", get(admin_view).post(admin_change));
     for module in &app.modules.modules {
@@ -243,6 +244,13 @@ async fn me(State(app): State<App>, headers: HeaderMap) -> Result<Json<Value>> {
         modules.push(json!({"id":m.id,"name":m.name,"enabled":app.store.module_enabled(m.id)?,"level":app.store.local_level(user.id,m.id)?,"scopes":m.scopes}));
     }
     out["modules"] = json!(modules);
+    let mut scopes = vec![];
+    if user.status == "active" {
+        for s in oauth::scopes(&app) {
+            scopes.push(json!({"scope":s,"available":oauth::available_scope(&app,&user,&s)?}));
+        }
+    }
+    out["scopes"] = json!(scopes);
     out["csrf"] = json!(csrf);
     out["endpoint"] = json!(app.config.resource());
     Ok(Json(out))
@@ -422,6 +430,67 @@ async fn revoke_client(
         "ok",
     )?;
     Ok(Json(json!({"ok":true})))
+}
+#[derive(Deserialize)]
+struct ClientScopes {
+    scopes: Vec<String>,
+}
+/// Changes an existing client grant with the same rules as consent; takes effect on the next request.
+async fn edit_client(
+    State(app): State<App>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(q): Json<ClientScopes>,
+) -> Result<Json<Value>> {
+    let (user, _) = session(&app, &headers, true)?;
+    csrf(&app, &headers)?;
+    let current = app.store.with(|c| {
+        c.query_row(
+            "SELECT scopes FROM grants WHERE id=? AND user_id=? AND revoked=0",
+            params![id, user.id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or_else(|| Error::new(404, "not_found", "Client grant not found"))
+    })?;
+    let known = oauth::scopes(&app);
+    let mut scopes: Vec<String> = vec![];
+    for scope in &q.scopes {
+        if !known.contains(scope) {
+            return Err(Error::invalid("Unknown scope"));
+        }
+        if !scopes.contains(scope) {
+            scopes.push(scope.clone());
+        }
+    }
+    if scopes.is_empty() {
+        return Err(Error::invalid(
+            "Keep at least one permission or revoke the client",
+        ));
+    }
+    // Newly added access needs the same availability as consent; existing access may be kept or narrowed.
+    for scope in &scopes {
+        if !current.split_whitespace().any(|s| s == scope)
+            && !oauth::available_scope(&app, &user, scope)?
+        {
+            return Err(Error::denied());
+        }
+    }
+    app.store.with(|c| {
+        c.execute(
+            "UPDATE grants SET scopes=? WHERE id=? AND user_id=? AND revoked=0",
+            params![scopes.join(" "), id, user.id],
+        )?;
+        Ok(())
+    })?;
+    app.store.audit(
+        request_id(&headers),
+        Some(user.id),
+        None,
+        "oauth.grant_edit",
+        "ok",
+    )?;
+    Ok(Json(json!({"ok":true,"scopes":scopes})))
 }
 #[derive(Deserialize)]
 struct FlowQuery {

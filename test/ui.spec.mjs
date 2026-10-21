@@ -36,6 +36,21 @@ test('saved tokens collapse the setup until the user reopens it',async({page})=>
   await page.getByRole('button',{name:'Hide',exact:true}).click();await expect(page.getByRole('heading',{name:'Infomaniak API token saved'})).toBeVisible();
   await page.screenshot({path:'test-results/connections-saved.png',fullPage:true});
 });
+test('client grants show readable permissions and can be edited in place',async({page})=>{
+  const scopes=[{scope:'mail:read',available:true},{scope:'mail:write',available:true},{scope:'calendar:read',available:false},{scope:'calendar:write',available:false},{scope:'kdrive:read',available:true},{scope:'kdrive:write',available:true}];
+  await page.route('**/api/me',r=>r.fulfill({json:{...account,scopes,clients:[{id:'grant-1',name:'ChatGPT',scopes:'mail:read mail:write calendar:read'}]}}));
+  let request;await page.route('**/api/clients/grant-1/scopes',r=>{request=r.request();return r.fulfill({json:{ok:true,scopes:['mail:read','calendar:read']}})});
+  await page.goto('/');
+  const grants=page.locator('section').filter({has:page.getByRole('heading',{name:'Client grants'})});
+  await expect(grants.getByText('Mail: read & write · Calendar: read only')).toBeVisible();
+  await grants.getByRole('button',{name:'Edit permissions'}).click();
+  await expect(grants.getByLabel(/Calendar · read calendar:read/)).toBeEnabled();await expect(grants.getByLabel(/Calendar · write actions/)).toBeDisabled();
+  await grants.getByLabel(/Mail · write actions/).uncheck();await grants.getByLabel(/kDrive · read kdrive:read/).check();await grants.getByLabel(/kDrive · read kdrive:read/).uncheck();
+  await page.screenshot({path:'test-results/grant-edit.png',fullPage:true});
+  await grants.getByRole('button',{name:'Save permissions'}).click();
+  await expect(page.getByRole('status')).toContainText('Permissions for ChatGPT updated');
+  expect(request.postDataJSON()).toEqual({scopes:['mail:read','calendar:read']});expect(request.headers()['x-csrf-token']).toBe('test-csrf');
+});
 test('administration shows configuration without rendering supplied html',async({page})=>{
   await page.route('**/api/me',r=>r.fulfill({json:{...account,user:{...account.user,admin:true}}}));
   await page.route('**/api/admin',r=>r.fulfill({json:{users:[{...account.user,name:'<img src=x onerror=alert(1)>'}],modules:[{id:'mail',enabled:false,verification:'',default_level:0}],groups:[],memberships:[],policies:[],connections:[],logs:[],manual_approval:false}}));

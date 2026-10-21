@@ -771,6 +771,101 @@ async fn personal_tokens_must_belong_to_the_user_and_connect_only_granted_servic
     );
 }
 #[tokio::test]
+async fn users_can_edit_client_grants_within_consent_rules() {
+    let h = Harness::new().await;
+    let headers = h.headers();
+    let edit = |scopes: Value| {
+        request(
+            &h.app,
+            "POST",
+            "/api/clients/grant-a/scopes",
+            json!({ "scopes": scopes }),
+            &headers,
+        )
+    };
+    let tools = || async {
+        h.rpc("tools/list", json!({})).await.value["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(edit(json!([])).await.status, 400);
+    assert_eq!(edit(json!(["mail:admin"])).await.status, 400);
+    assert_eq!(
+        request(
+            &h.app,
+            "POST",
+            "/api/clients/grant-a/scopes",
+            json!({"scopes":["mail:read"]}),
+            &[("cookie", format!("__Host-mcp_session={}", h.session))],
+        )
+        .await
+        .status,
+        403
+    );
+    let saved = edit(json!(["mail:read", "calendar:read", "mail:read"])).await;
+    assert_eq!(saved.status, 200);
+    assert_eq!(saved.value["scopes"], json!(["mail:read", "calendar:read"]));
+    let names = tools().await;
+    assert!(names.iter().any(|n| n == "mail_search_emails"));
+    assert!(names.iter().any(|n| n == "calendar_list_events"));
+    assert!(
+        !names
+            .iter()
+            .any(|n| n == "mail_send_email" || n.starts_with("kdrive_"))
+    );
+    // Existing access may be kept after its service becomes unavailable, but not widened.
+    h.sql("DELETE FROM credentials WHERE module='calendar'");
+    assert_eq!(
+        edit(json!(["mail:read", "calendar:read"])).await.status,
+        200
+    );
+    assert_eq!(
+        edit(json!(["mail:read", "calendar:read", "calendar:write"]))
+            .await
+            .status,
+        403
+    );
+    assert_eq!(edit(json!(["mail:read", "mail:write"])).await.status, 200);
+    assert!(tools().await.iter().any(|n| n == "mail_send_email"));
+    let me = request(&h.app, "GET", "/api/me", Value::Null, &headers).await;
+    assert!(
+        me.value["scopes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["scope"] == "calendar:read" && s["available"] == false)
+    );
+    let bob = h
+        .app
+        .store
+        .admit(
+            &h.app.config,
+            ISSUER,
+            "employee-b",
+            "bob@team-ensemble.ch",
+            "Bob",
+        )
+        .unwrap();
+    h.sql(&format!(
+        "INSERT INTO grants(id,user_id,client_id,scopes) VALUES('grant-b',{},'client-a','mail:read')",
+        bob.id
+    ));
+    let other = request(
+        &h.app,
+        "POST",
+        "/api/clients/grant-b/scopes",
+        json!({"scopes":["mail:read"]}),
+        &headers,
+    )
+    .await;
+    assert_eq!(other.status, 404);
+    h.sql("UPDATE grants SET revoked=1 WHERE id='grant-a'");
+    assert_eq!(edit(json!(["mail:read"])).await.status, 404);
+}
+#[tokio::test]
 async fn upstream_reconnection_failures_keep_http_status_for_tools_and_resources() {
     for target in ["GET /3/drive/9/files/42", "POST /token"] {
         for method in ["tools/call", "resources/read", "resources/list"] {

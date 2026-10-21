@@ -16,3 +16,4 @@ Apply [access rules](access.md) throughout.
 - Shared endpoint and client connection instructions.
 - Enabled services and client grants.
 - Guided personal API token setup: link to the Infomaniak token page, the exact form values (name `MCP Server Team Ensemble`, application `Standardanwendung`, scopes `Alle`, validity `Unbegrenzt`, empty description) and a paste field. Once saved, the instructions collapse and can be reopened to replace the token. Users can disconnect their own token/clients.
+- Client grants show readable per-service permissions and can be edited in place with the consent checklist. Added scopes require current availability; existing scopes may be kept or removed. Changes apply to the client's next request.
