@@ -15,4 +15,4 @@ Apply [access rules](access.md) throughout.
 - Sign in with Infomaniak; show pending approval when manual onboarding applies.
 - Shared endpoint and client connection instructions.
 - Enabled services and client grants.
-- Grant service access and connect, reconnect or disconnect their own Infomaniak account/clients.
+- Guided personal API token setup: link to the Infomaniak token page, required scopes with copy action, paste field. Replace or disconnect their own token/clients.

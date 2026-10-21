@@ -73,6 +73,7 @@ pub fn router(app: App) -> Router {
         .route("/api/me", get(me))
         .route("/api/logout", post(logout))
         .route("/api/connect/{module}", post(connect))
+        .route("/api/token", post(save_token))
         .route("/api/disconnect/{module}", post(disconnect))
         .route("/api/clients/{id}/revoke", post(revoke_client))
         .route("/api/authorize", get(consent_view).post(oauth::consent))
@@ -292,6 +293,87 @@ async fn connect(
     )
         .into_response())
 }
+#[derive(Deserialize)]
+struct PersonalToken {
+    token: String,
+}
+/// Personal tokens do not report their expiry; provider 401s mark them for replacement.
+const PERSONAL_TOKEN_LIFETIME: i64 = 86400 * 365 * 10;
+async fn save_token(
+    State(app): State<App>,
+    headers: HeaderMap,
+    Json(input): Json<PersonalToken>,
+) -> Result<Json<Value>> {
+    let (user, _) = session(&app, &headers, true)?;
+    csrf(&app, &headers)?;
+    app.store.throttle("personal_token", 20)?;
+    let token = input.token.trim();
+    if token.is_empty() || token.len() > 512 || !token.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(Error::invalid(
+            "Paste the API token exactly as Infomaniak shows it",
+        ));
+    }
+    let rejected = || {
+        Error::new(
+            400,
+            "token_rejected",
+            "Infomaniak rejected this token; create a new one with all listed scopes",
+        )
+    };
+    let profile = crate::modules::data(
+        app.provider
+            .request(
+                token,
+                reqwest::Method::GET,
+                format!("{}/2/profile", app.provider.api),
+                &[],
+                None,
+            )
+            .await
+            .map_err(|e| match e.code {
+                "reconnection_required" | "access_denied" | "provider_not_found" => rejected(),
+                _ => e,
+            })?,
+    );
+    // The token must belong to the signed-in Infomaniak account, never a colleague's.
+    let email = profile["email"].as_str().ok_or_else(rejected)?;
+    let id = profile["id"]
+        .as_i64()
+        .map(|id| id.to_string())
+        .or_else(|| profile["id"].as_str().map(String::from));
+    if !email.eq_ignore_ascii_case(&user.email) || id.is_some_and(|id| id != user.subject) {
+        return Err(Error::new(
+            403,
+            "token_owner_mismatch",
+            "This token belongs to another Infomaniak account",
+        ));
+    }
+    let mut connected = vec![];
+    for module in &app.modules.modules {
+        if !app.store.module_enabled(module.id)? || app.store.local_level(user.id, module.id)? == 0
+        {
+            continue;
+        }
+        let secret = crypto::seal(
+            &app.config.encryption_key,
+            &format!("credential:{}:{}", user.id, module.id),
+            &serde_json::to_vec(&identity::Credential {
+                access_token: token.into(),
+                refresh_token: None,
+            })?,
+        )?;
+        app.store.with(|c|{c.execute("INSERT INTO credentials(user_id,module,secret,scopes,expires) VALUES(?,?,?,?,?) ON CONFLICT(user_id,module) DO UPDATE SET secret=excluded.secret,scopes=excluded.scopes,expires=excluded.expires,health='connected',checked=0",params![user.id,module.id,secret,module.scopes.join(" "),now()+PERSONAL_TOKEN_LIFETIME])?;Ok(())})?;
+        connected.push(module.id);
+    }
+    app.store.audit(
+        request_id(&headers),
+        Some(user.id),
+        None,
+        "credential.token",
+        "ok",
+    )?;
+    Ok(Json(json!({"ok":true,"connected":connected})))
+}
 async fn disconnect(
     State(app): State<App>,
     headers: HeaderMap,
@@ -315,7 +397,7 @@ async fn disconnect(
         "ok",
     )?;
     Ok(Json(
-        json!({"ok":true,"upstream_revocation":"Local access removed. Revoke the application's provider consent in Infomaniak to invalidate upstream tokens."}),
+        json!({"ok":true,"upstream_revocation":"Local access removed. Delete your API token in the Infomaniak Manager to invalidate it upstream."}),
     ))
 }
 async fn revoke_client(

@@ -22,13 +22,16 @@
 
 ## Infomaniak authorisation
 
-- Obtain each user's API tokens through delegated authorisation; verify account ownership and automate token exchange/renewal. Support reconnection and revocation.
-- Employees never create API applications or generate, copy or paste personal API keys/tokens.
+- Decision 2026-10-21: Infomaniak OAuth applications only grant sign-in scopes (`openid profile email phone`); API scopes return `invalid_scope` ([developer docs](https://developer.infomaniak.com/getting-started) document API access through personal access tokens). Service access therefore uses one personal API token per employee.
+- Employees create the token in the [Infomaniak Manager](https://manager.infomaniak.com/v3/ng/accounts/token/list) and paste it once in the portal, which links there and lists the scopes required by their enabled, granted services. They never create API applications.
+- Accept a token only when `GET /2/profile` succeeds and returns the signed-in user's email (and subject, when an ID is returned); never accept a colleague's token. Store it encrypted per user/service for each enabled, granted service. Provider 401s mark the connection for replacement; tokens have no server-side renewal.
+- Disconnect removes local credentials; the employee deletes the token in Infomaniak to invalidate it upstream.
 - Keep upstream credentials separate from MCP tokens and hidden from clients/tool results.
 - Signing in does not itself grant Mail, Calendar or kDrive API access.
+- The delegated OAuth connect flow remains implemented for providers that grant API scopes, but the portal does not offer it.
 
 ## Before implementation
 
 - Choose the public HTTPS origin. The organisation administrator creates an Infomaniak OAuth/OIDC application supporting server-side authorisation code; register `/auth/infomaniak/callback` under that origin and configure its [client credentials](environment.md).
-- Test two employees through the same application: validated identity claims, independent consent, API isolation and token renewal/revocation. Verify required service scopes: `workspace:mail`, `workspace:calendar`, `user_info`, `drive`.
-- Enable modules only after delegated access is verified. Unsupported grants require a supported provider integration; personal-token entry is not an accepted fallback.
+- Test two employees: validated identity claims, personal-token ownership, API isolation and token deletion. Verify personal tokens with scopes `workspace:mail`, `workspace:calendar`, `user_info`, `drive`.
+- Enable modules only after this access is verified.

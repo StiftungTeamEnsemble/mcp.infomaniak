@@ -709,6 +709,68 @@ async fn consent_and_credential_removal_take_effect_on_next_operation() {
     assert_eq!(h.rpc("tools/list", json!({})).await.status, 401);
 }
 #[tokio::test]
+async fn personal_tokens_must_belong_to_the_user_and_connect_only_granted_services() {
+    let h = Harness::new().await;
+    h.sql("DELETE FROM credentials; UPDATE policies SET level=0 WHERE module='calendar'");
+    let headers = h.headers();
+    let save = |token: &str| {
+        request(
+            &h.app,
+            "POST",
+            "/api/token",
+            json!({ "token": token }),
+            &headers,
+        )
+    };
+    assert_eq!(save("two words").await.status, 400);
+    let profile = "GET /2/profile".to_owned();
+    for (status, body, code) in [
+        (StatusCode::UNAUTHORIZED, json!({}), "token_rejected"),
+        (
+            StatusCode::OK,
+            json!({"data":{"email":"bob@team-ensemble.ch"}}),
+            "token_owner_mismatch",
+        ),
+        (
+            StatusCode::OK,
+            json!({"data":{"id":99,"email":"alice@team-ensemble.ch"}}),
+            "token_owner_mismatch",
+        ),
+    ] {
+        h.mock
+            .lock()
+            .unwrap()
+            .queued_responses
+            .insert(profile.clone(), [(status, body)].into());
+        assert_eq!(save("personal-b").await.value["error"], code);
+    }
+    assert!(
+        h.app
+            .store
+            .with(
+                |c| Ok(c.query_row("SELECT COUNT(*) FROM credentials", [], |r| r
+                    .get::<_, i64>(0))?)
+            )
+            .unwrap()
+            == 0
+    );
+    let saved = save(" personal-a\n").await;
+    assert_eq!(saved.status, 200);
+    assert_eq!(saved.value["connected"], json!(["mail", "kdrive"]));
+    let out = h
+        .call("kdrive_info", json!({"drive_id":9,"file_id":42}))
+        .await;
+    assert!(out["result"].is_object());
+    assert_eq!(
+        h.mock.lock().unwrap().calls.last().unwrap().2,
+        "Bearer personal-a"
+    );
+    assert_eq!(
+        h.call("calendar_list_calendars", json!({})).await["error"],
+        "access_denied"
+    );
+}
+#[tokio::test]
 async fn upstream_reconnection_failures_keep_http_status_for_tools_and_resources() {
     for target in ["GET /3/drive/9/files/42", "POST /token"] {
         for method in ["tools/call", "resources/read", "resources/list"] {
