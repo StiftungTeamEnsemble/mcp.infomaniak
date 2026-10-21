@@ -51,7 +51,15 @@ impl Error {
                     .get("provider_code")
                     .and_then(|c| c.as_str())
                     .unwrap_or("-");
-                return Some(format!("provider {status} {code}"));
+                let endpoint = o
+                    .get("provider_endpoint")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("");
+                return Some(
+                    format!("provider {status} {code} {endpoint}")
+                        .trim_end()
+                        .into(),
+                );
             }
             o.values().find_map(find)
         }

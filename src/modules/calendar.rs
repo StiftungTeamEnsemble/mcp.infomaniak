@@ -197,29 +197,42 @@ fn attendees(input: &str, profile: &Value) -> Result<Value> {
     Ok(json!(people))
 }
 
-async fn annotate(c: &Call, mut events: Vec<Value>) -> Result<Vec<Value>> {
+/// Room names are optional enrichment, as in the reference client: a failed lookup
+/// keeps the events and reports a warning; only an invalid token stops the call.
+async fn annotate(c: &Call, mut events: Vec<Value>) -> Result<(Vec<Value>, Option<&'static str>)> {
     if !events.iter().any(|e| {
         e["bookable_resource_id"]
             .as_str()
             .is_some_and(|s| !s.is_empty())
     }) {
-        return Ok(events);
+        return Ok((events, None));
     }
-    let rooms = data(
-        c.app
-            .provider
-            .request(
-                &c.token,
-                Method::GET,
-                format!(
-                    "{}/1/calendar/pim/bookable-resources/all",
-                    c.app.provider.api
-                ),
-                &[("with[]".into(), "permission".into())],
-                None,
-            )
-            .await?,
-    );
+    let rooms = match c
+        .app
+        .provider
+        .request(
+            &c.token,
+            Method::GET,
+            format!(
+                "{}/1/calendar/pim/bookable-resources/all",
+                c.app.provider.api
+            ),
+            &[("with[]".into(), "permission".into())],
+            None,
+        )
+        .await
+    {
+        Ok(rooms) => data(rooms),
+        Err(e) if e.code == "reconnection_required" => return Err(e),
+        Err(_) => {
+            for event in &mut events {
+                if event["bookable_resource_id"].is_string() {
+                    event["bookable_resource_name"] = Value::Null;
+                }
+            }
+            return Ok((events, Some("Room names unavailable from the provider")));
+        }
+    };
     for event in &mut events {
         if let Some(id) = event["bookable_resource_id"].as_str() {
             let name = rooms
@@ -230,7 +243,7 @@ async fn annotate(c: &Call, mut events: Vec<Value>) -> Result<Vec<Value>> {
             event["bookable_resource_name"] = name;
         }
     }
-    Ok(events)
+    Ok((events, None))
 }
 
 fn provider_id(value: &Value) -> Option<String> {
@@ -313,8 +326,11 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
         json!({})
     };
     if name == "calendar_get_event" {
-        let events = annotate(&c, vec![existing]).await?;
-        return Ok(result(events[0].clone(), json!({"event_id":event_id})));
+        let (events, warning) = annotate(&c, vec![existing]).await?;
+        return Ok(result(
+            events[0].clone(),
+            json!({"event_id":event_id,"warning":warning}),
+        ));
     }
     if event_id.is_some() {
         let recurring = existing["rrule"].as_str().is_some_and(|s| !s.is_empty())
@@ -450,9 +466,10 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
             .into_iter()
             .map(|event| event_metadata(event, None, Some(&calendar_string), false, false))
             .collect::<Result<Vec<_>>>()?;
+        let (events, warning) = annotate(&c, events).await?;
         return Ok(result(
-            json!(annotate(&c, events).await?),
-            json!({"calendar_id":calendar,"timezone":timezone}),
+            json!(events),
+            json!({"calendar_id":calendar,"timezone":timezone,"warning":warning}),
         ));
     }
     let create = name == "calendar_create_event";

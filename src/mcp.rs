@@ -85,7 +85,7 @@ pub async fn handle(State(app): State<App>, headers: HeaderMap, body: Bytes) -> 
                 VERSION
             };
             Ok(
-                json!({"protocolVersion":version,"serverInfo":{"name":"ensemble-mcp","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{},"resources":{}},"instructions":"Use service tools with this connection's consent. Reconnect in the organisation portal if a service requires consent. Never retry an uncertain mutation without checking its outcome."}),
+                json!({"protocolVersion":version,"serverInfo":{"name":"ensemble-mcp","title":"Team Ensemble","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{},"resources":{}},"instructions":"Use service tools with this connection's consent. Reconnect in the organisation portal if a service requires consent. Never retry an uncertain mutation without checking its outcome."}),
             )
         }
         "ping" => Ok(json!({})),

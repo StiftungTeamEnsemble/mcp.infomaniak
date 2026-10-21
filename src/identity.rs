@@ -667,6 +667,20 @@ pub async fn callback(
 
 /// Safe diagnostics only: the status and the provider's machine-readable error code, never descriptions or bodies.
 async fn provider_rejection(status: u16, mut response: reqwest::Response) -> Value {
+    // Endpoint shape only: segments containing digits (object IDs) are masked.
+    let endpoint = response
+        .url()
+        .path()
+        .split('/')
+        .map(|s| {
+            if (s.len() > 1 && s.bytes().any(|b| b.is_ascii_digit())) || s.len() > 40 {
+                "{id}"
+            } else {
+                s
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/");
     let mut bytes = Vec::new();
     while let Ok(Some(chunk)) = response.chunk().await {
         if bytes.len() + chunk.len() > 65536 {
@@ -687,7 +701,7 @@ async fn provider_rejection(status: u16, mut response: reqwest::Response) -> Val
                 && c.bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"_.-:".contains(&b))
         });
-    json!({"provider_status":status,"provider_code":code})
+    json!({"provider_status":status,"provider_code":code,"provider_endpoint":endpoint})
 }
 
 pub fn binary(uri: String, filename: String, mime: String, bytes: Vec<u8>) -> Value {

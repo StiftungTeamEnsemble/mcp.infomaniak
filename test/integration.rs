@@ -2273,6 +2273,26 @@ async fn calendar_event_lists_validate_identities_and_preserve_provider_metadata
     assert_eq!(result(&out)["data"][0]["calendar_id"], 12);
     assert_eq!(result(&out)["data"][0]["timezone_start"], "Europe/Zurich");
     assert_eq!(result(&out)["data"][0]["bookable_resource_name"], "Studio");
+    for status in [StatusCode::SERVICE_UNAVAILABLE, StatusCode::FORBIDDEN] {
+        h.mock
+            .lock()
+            .unwrap()
+            .response_statuses
+            .insert("GET /1/calendar/pim/bookable-resources/all".into(), status);
+        let out = h
+            .call(
+                "calendar_list_events",
+                json!({"from":"2026-10-17","to":"2026-10-18","calendar_id":"12"}),
+            )
+            .await;
+        assert_eq!(out["result"]["isError"], false, "{out}");
+        assert_eq!(result(&out)["data"][0]["id"], 7);
+        assert!(result(&out)["data"][0]["bookable_resource_name"].is_null());
+        assert_eq!(
+            result(&out)["context"]["warning"],
+            "Room names unavailable from the provider"
+        );
+    }
 }
 
 #[tokio::test]
@@ -2603,7 +2623,10 @@ async fn sent_emails_reuse_the_accepted_draft_payload_and_report_provider_reject
             )?)
         })
         .unwrap();
-    assert_eq!(outcome, "partial_mutation (provider 422 validation_failed)");
+    assert_eq!(
+        outcome,
+        "partial_mutation (provider 422 validation_failed /mail/box-a/draft/{id})"
+    );
 }
 #[tokio::test]
 async fn upload_validates_exclusive_content_and_handles_empty_text() {
