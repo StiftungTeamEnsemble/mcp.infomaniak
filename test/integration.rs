@@ -1307,7 +1307,7 @@ async fn kdrive_sharing_identifiers_never_become_file_resources() {
     let resources = h.rpc("resources/list", json!({})).await.value;
     assert_eq!(
         resources["result"]["resources"].as_array().unwrap().len(),
-        1
+        0
     );
     assert!(
         !h.mock
@@ -1448,8 +1448,7 @@ async fn deleted_or_unshared_resources_do_not_break_discovery() {
             .insert("GET /3/drive/9/files/42".into(), status);
         let discovered = h.rpc("resources/list", json!({})).await.value;
         let resources = discovered["result"]["resources"].as_array().unwrap();
-        assert_eq!(resources.len(), 1, "{discovered}");
-        assert_eq!(resources[0]["uri"], "ui://ensemble/object.html");
+        assert!(resources.is_empty(), "{discovered}");
         let count = h
             .app
             .store
@@ -1505,7 +1504,7 @@ async fn resource_pagination_does_not_skip_files_when_stale_references_are_remov
     let first = h.rpc("resources/list", json!({})).await.value;
     assert_eq!(
         first["result"]["resources"].as_array().unwrap().len(),
-        1,
+        0,
         "{first}"
     );
     let cursor = &first["result"]["nextCursor"];

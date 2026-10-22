@@ -69,7 +69,7 @@ impl Tool {
         json!({"name":self.name,"description":self.description,"inputSchema":self.schema,
             "outputSchema":{"type":"object","properties":{"data":self.output,"context":{"type":"object"},"has_more":{"type":"boolean"},"cursor":{"type":["string","null"]},"next_offset":{"type":["integer","null"]},"content":{"type":"array"}},"required":["data","context"]},
             "annotations":{"readOnlyHint":!self.write,"destructiveHint":self.destructive,"idempotentHint":!self.write,"openWorldHint":self.external},
-            "securitySchemes":[{"type":"oauth2","scopes":[scope]}],"_meta":{"ui":{"resourceUri":"ui://ensemble/object.html"},"openai/outputTemplate":"ui://ensemble/object.html"}})
+            "securitySchemes":[{"type":"oauth2","scopes":[scope]}]})
     }
     pub fn validate(&self, args: &Value) -> Result<()> {
         validate(args, &self.schema)

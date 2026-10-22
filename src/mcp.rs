@@ -9,7 +9,6 @@ use axum::{
 use rusqlite::params;
 use serde_json::{Value, json};
 
-const CARD_URI: &str = "ui://ensemble/object.html";
 const VERSION: &str = "2025-11-25";
 fn rpc_error(id: Value, code: i64, message: &str) -> Response {
     (
@@ -267,17 +266,6 @@ async fn resources(
     method: &str,
     mut params: Value,
 ) -> Result<Value> {
-    if method == "resources/read" && params["uri"] == CARD_URI {
-        if !app.modules.modules.iter().any(|m| {
-            oauth::allowed(app, actor, m.id, false).is_ok()
-                || oauth::allowed(app, actor, m.id, true).is_ok()
-        }) {
-            return Err(Error::denied());
-        }
-        return Ok(
-            json!({"contents":[{"uri":CARD_URI,"mimeType":"text/html;profile=mcp-app","text":include_str!("../web/card.html"),"_meta":{"ui":{"csp":{"connectDomains":[],"resourceDomains":[]}},"openai/widgetCSP":{"connect_domains":[],"resource_domains":[]}}}]}),
-        );
-    }
     if method == "resources/read" {
         let uri = params["uri"]
             .as_str()
@@ -358,14 +346,6 @@ async fn resources(
         (0, None)
     };
     let mut items = vec![];
-    if cursor.is_none()
-        && app.modules.modules.iter().any(|m| {
-            oauth::allowed(app, actor, m.id, false).is_ok()
-                || oauth::allowed(app, actor, m.id, true).is_ok()
-        })
-    {
-        items.push(json!({"uri":CARD_URI,"name":"Mail, event and file cards","mimeType":"text/html;profile=mcp-app"}));
-    }
     let mut out = json!({});
     if let Some(module) = available.get(index) {
         params["cursor"] = upstream.map(Value::String).unwrap_or(Value::Null);

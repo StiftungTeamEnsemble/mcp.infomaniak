@@ -15,6 +15,5 @@
 - Report partial/uncertain mutations with known object IDs, failed phase and progress in text and safe error metadata, including after operation deadlines. Authorisation failures retain that recovery context alongside their HTTP error. Provider rejections add `provider_status`, the provider's machine-readable `provider_code` and the `provider_endpoint` path with ID segments masked (never descriptions/bodies) to error context and the tool audit outcome. Never silently repeat non-idempotent actions. An unreadable or oversized response after a write is an uncertain outcome.
 - Stable object IDs, meaningful summaries, source links where available; concise text alongside structured results.
 - Binary content: typed MCP content/resources or authenticated user-scoped transfers; no arbitrary server paths.
-- Mail/event/file cards with source navigation through supported MCP Apps, inspired by [Twenty](https://github.com/twentyhq/twenty/pull/26179). Follow [ChatGPT's UI contract](https://developers.openai.com/plugins/concepts/plugins#optional-ui).
-- Complete functionality through text/structured results; all card actions follow [access rules](access.md). No separate chat application.
+- Decision 2026-10-22: no MCP App widgets. Generic result cards cluttered ChatGPT answers; hosts render text/structured results themselves, using the `source_url` links they contain. No separate chat application.
 - Follow the shared [logging requirements](coding-style.md#logging).

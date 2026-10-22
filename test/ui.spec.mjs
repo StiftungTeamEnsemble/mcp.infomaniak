@@ -57,13 +57,3 @@ test('administration shows configuration without rendering supplied html',async(
   await page.goto('/');await page.getByRole('button',{name:'Administration'}).click();await expect(page.getByRole('heading',{name:'People'})).toBeVisible();await expect(page.locator('img')).toHaveCount(0);await expect(page.getByText('<img src=x onerror=alert(1)>')).toBeVisible();
   await page.screenshot({path:'test-results/admin.png',fullPage:true});
 });
-test('MCP cards render text safely and only offer provider source links',async({page})=>{
-  await page.goto('/');await page.evaluate(()=>{window.cardMessages=[];window.addEventListener('message',e=>{if(e.data?.jsonrpc!=='2.0')return;window.cardMessages.push(e.data);if(e.data.method==='ui/initialize')e.source.postMessage({jsonrpc:'2.0',id:e.data.id,result:{protocolVersion:'2026-01-26',hostCapabilities:{}}},'*')});const frame=document.createElement('iframe');frame.src='/card';frame.id='test-card';document.body.append(frame)});
-  const frame=page.frameLocator('#test-card');await expect(frame.getByRole('heading',{name:'Team Ensemble'})).toBeVisible();
-  await page.evaluate(()=>document.getElementById('test-card').contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{data:[{subject:'<img onerror=alert(1)>',preview:'Private preview',url:'javascript:alert(1)'},{title:'Meeting',description:'Project review'}],context:{source_url:'https://ksuite.infomaniak.com/calendar'}}}},'*'));
-  await expect.poll(()=>page.evaluate(()=>window.cardMessages.some(m=>m.method==='ui/notifications/initialized'&&!('id' in m)))).toBe(true);
-  await expect(frame.getByText('<img onerror=alert(1)>')).toBeVisible();await expect(frame.locator('img')).toHaveCount(0);await expect(frame.getByRole('button',{name:'Open in Infomaniak'})).toHaveCount(1);
-  await frame.getByRole('button',{name:'Open in Infomaniak'}).click();
-  await expect.poll(()=>page.evaluate(()=>window.cardMessages.some(m=>m.method==='ui/open-link'&&m.params.url==='https://ksuite.infomaniak.com/calendar'))).toBe(true);
-  await page.screenshot({path:'test-results/cards.png',fullPage:true});
-});

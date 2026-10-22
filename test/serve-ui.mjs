@@ -4,7 +4,6 @@ const routes={
   '/':['web/index.html','text/html'],
   '/assets/app.js':['web/dist/app.js','text/javascript'],
   '/assets/style.css':['web/style.css','text/css'],
-  '/card':['web/card.html','text/html'],
 };
 createServer(async(req,res)=>{
   const path=new URL(req.url,'http://127.0.0.1').pathname;
