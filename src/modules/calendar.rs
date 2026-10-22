@@ -3,6 +3,7 @@ use super::*;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use reqwest::Method;
+mod availability;
 
 fn result(value: Value, mut context: Value) -> Value {
     context["source_url"] = json!("https://ksuite.infomaniak.com/calendar");
@@ -37,6 +38,7 @@ pub fn module() -> Module {
         resources: None,
         handler: |c, n| Box::pin(call(c, n)),
         tools: vec![
+            availability::tool(),
             tool(
                 "calendar_list_calendars",
                 "List calendars granted by Infomaniak.",
@@ -101,6 +103,9 @@ pub fn module() -> Module {
     let event = json!({"type":"object","properties":{"id":{"type":["string","integer"]},"calendar_id":{"type":["string","integer"]},"title":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"timezone_start":{"type":"string"},"timezone_end":{"type":"string"},"attendees":{"type":"array"},"alarms":{"type":"array"},"attachments":{"type":"array"},"rrule":{"type":["string","null"]},"bookable_resource_name":{"type":["string","null"]}}});
     for tool in &mut module.tools {
         tool.output = match tool.name.as_str() {
+            "calendar_find_free_slots" => {
+                continue;
+            }
             "calendar_list_calendars" => {
                 json!({"type":"object","properties":{"calendars":{"type":"array","items":{"type":"object","properties":{"id":{"type":["string","integer"]},"name":{"type":"string"},"default":{"type":"boolean"}}}}}})
             }
@@ -336,6 +341,9 @@ fn writable_event(event: &Value, tz_start: &str, tz_end: &str) -> Value {
 }
 
 pub async fn call(c: Call, name: String) -> Result<Value> {
+    if name == "calendar_find_free_slots" {
+        return availability::find(c).await;
+    }
     let args = &c.args;
     let base = format!("{}/1/calendar/pim", c.app.provider.api);
     if name == "calendar_list_calendars" {

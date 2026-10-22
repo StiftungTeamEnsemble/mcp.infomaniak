@@ -2,6 +2,8 @@
 
 Organisation-operated Rust service for Infomaniak Mail, Calendar, kDrive and kChat, with a React connection and administration portal. Requirements are in [spec](spec/README.md).
 
+Compatible MCP Apps clients can show shared calendar availability, individual kChat/email messages and expandable kDrive folders inline. Use the four focused [app tools](spec/mcp.md#mcp-apps); existing data tools remain available for ordinary queries. Refresh client connections after deploying tool or template changes.
+
 ## Run locally
 
 Requires Rust 1.97+, Node.js 24+ and an organisation Infomaniak OAuth/OIDC application. Use a public HTTPS origin, including for local browser testing.

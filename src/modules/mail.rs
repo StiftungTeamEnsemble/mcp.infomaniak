@@ -435,6 +435,19 @@ pub fn module() -> Module {
             t.schema["properties"]["mailbox_uuid"] = path_id();
         }
     }
+    let mut show = tools
+        .iter()
+        .find(|t| t.name == "mail_read_email")
+        .unwrap()
+        .clone();
+    show.name = "mail_show_email".into();
+    show.description = "Show one email inline, with participants, body and attachment metadata. Uses the same mailbox, folder and message selectors as mail_read_email.".into();
+    show.ui = Some(crate::mcp_apps::Ui {
+        uri: "ui://mail/message-v1.html",
+        title: "Email",
+        script: include_str!("mail/app.js"),
+    });
+    tools.push(show);
     Module {
         id: "mail",
         name: "Mail",
@@ -1089,6 +1102,11 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
         .ok_or_else(|| Error::new(502, "provider_error", "Mailbox UUID is missing or invalid"))?;
     let base = format!("{}/mail/{}", c.app.provider.mail, segment(uuid));
     let context = json!({"mailbox_uuid":uuid,"folder_id":args["folder_id"],"source_url":"https://mail.infomaniak.com"});
+    let name = if name == "mail_show_email" {
+        "mail_read_email"
+    } else {
+        &name
+    };
     let op = name
         .strip_prefix("mail_")
         .ok_or_else(|| Error::invalid("Unknown mail operation"))?;

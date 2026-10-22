@@ -4,6 +4,7 @@
 - Follow the [coding and implementation principles](spec/coding-style.md) for security, reliability, scope, logging and reuse.
 - Follow the [module contract](spec/module-system.md) when adding or changing services.
 - Keep module tool names, arguments and results explicit; link provider adapters for upstream API calls.
+- Keep [MCP Apps](spec/mcp.md#mcp-apps) focused and module-owned; preserve data-only tools, scoped resource access and authoritative reads for app interactions.
 - Keep deployment variables and domain restrictions in the [environment spec](spec/environment.md). Keep `compose.yaml` platform-portable (Coolify uses it alone); local-only settings belong in `compose.override.yaml`.
 - Preserve [browser-based sign-in](spec/identity.md) when changing authentication. Service access uses guided [personal API tokens](spec/identity.md#infomaniak-authorisation) that must match the signed-in account; store one credential per user and provider (all Infomaniak services share `infomaniak`) and keep that setup simple.
 - Change existing databases only through a new step in `src/migrations.rs` (SQLite `user_version`); keep `src/schema.sql` the current fresh-database schema.

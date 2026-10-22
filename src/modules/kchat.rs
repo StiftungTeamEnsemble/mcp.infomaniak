@@ -39,6 +39,15 @@ pub fn module() -> Module {
         handler: |c, n| Box::pin(call(c, n)),
         tools: vec![
             tool(
+                "kchat_show_message",
+                "Show a single kChat post inline with its permalink. post_id is the provider post ID; channel_id optionally checks its channel.",
+                false,
+                false,
+                true,
+                &["post_id"],
+                vec![("post_id", path_id()), ("channel_id", path_id())],
+            ),
+            tool(
                 "kchat_list_channels",
                 "List public channels of the organisation's kChat team.",
                 false,
@@ -157,6 +166,13 @@ pub fn module() -> Module {
             }
             _ => post.clone(),
         };
+        if tool.name == "kchat_show_message" {
+            tool.ui = Some(crate::mcp_apps::Ui {
+                uri: "ui://kchat/message-v1.html",
+                title: "kChat message",
+                script: include_str!("kchat/app.js"),
+            });
+        }
     }
     module
 }
@@ -231,6 +247,15 @@ impl Kchat<'_> {
         kid(&found["id"])
             .map(String::from)
             .ok_or_else(|| invalid(false))
+    }
+    /// Optional view enrichment: a failed or mismatched lookup leaves names
+    /// out; only an invalid token stops the call.
+    async fn lookup(&self, path: &str, id: &str) -> Result<Option<Value>> {
+        match self.get(path, &[]).await {
+            Ok(found) => Ok((kid(&found["id"]) == Some(id)).then_some(found)),
+            Err(e) if e.code == "reconnection_required" => Err(e),
+            Err(_) => Ok(None),
+        }
     }
     async fn me(&self) -> Result<String> {
         let me = self.get("/users/me", &[]).await?;
@@ -329,6 +354,46 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
     };
     let args = &c.args;
     match name.as_str() {
+        "kchat_show_message" => {
+            let post_id = arg(args, "post_id")?;
+            let channel = args
+                .get("channel_id")
+                .map(|_| arg(args, "channel_id"))
+                .transpose()?;
+            let post = k.get(&format!("/posts/{post_id}"), &[]).await?;
+            if kid(&post["id"]) != Some(post_id)
+                || kid(&post["channel_id"]).is_none()
+                || kid(&post["user_id"]).is_none()
+                || !post["message"].is_string()
+                || post
+                    .get("root_id")
+                    .is_some_and(|root| root != "" && kid(root).is_none())
+                || channel.is_some_and(|id| kid(&post["channel_id"]) != Some(id))
+            {
+                return Err(invalid(false));
+            }
+            let (user, channel) = (
+                kid(&post["user_id"]).unwrap_or_default(),
+                kid(&post["channel_id"]).unwrap_or_default(),
+            );
+            let author = k.lookup(&format!("/users/{user}"), user).await?.map(|u| {
+                let full = [&u["first_name"], &u["last_name"]]
+                    .iter()
+                    .filter_map(|n| n.as_str().filter(|n| !n.is_empty()))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                json!({"username":u["username"],"name":if full.is_empty() {u["nickname"].clone()} else {json!(full)}})
+            });
+            let channel = k
+                .lookup(&format!("/channels/{channel}"), channel)
+                .await?
+                .map(|ch| json!({"name":ch["display_name"],"type":ch["type"]}));
+            Ok(result(
+                post,
+                json!({"post_id":post_id,"author":author,"channel":channel}),
+                &team,
+            ))
+        }
         "kchat_list_channels" => {
             let team_id = k.team_id(&team).await?;
             let (limit, page, query) = paging(args, 100);

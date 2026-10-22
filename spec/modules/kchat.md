@@ -12,6 +12,7 @@ The organisation's team is set once with `KCHAT_TEAM` ([environment](../environm
 - `kchat_list_my_channels()` → the user's channels, including private, direct and group channels (project extension: needed to address private conversations).
 - `kchat_get_channel_history(channel_id, limit=10, page=0)` → posts, newest first.
 - `kchat_get_thread_replies(thread_id)` → root post and replies, oldest first.
+- `kchat_show_message(post_id, channel_id?)` → one post in an [inline MCP App](../mcp.md#mcp-apps) with author and channel names (context `author`, `channel`), time, text and permalink. Fetches `/posts/{post_id}`; validates the post/user/channel/root identities and any supplied channel selector.
 - `kchat_get_users(limit=100, page=0)` → user profiles.
 - `kchat_get_user_profile(user_id)` → profile.
 - `kchat_post_message(channel_id, text)` → created post.

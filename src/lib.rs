@@ -2,6 +2,7 @@ pub mod config;
 pub mod crypto;
 pub mod identity;
 pub mod mcp;
+pub mod mcp_apps;
 pub mod migrations;
 pub mod modules;
 pub mod oauth;

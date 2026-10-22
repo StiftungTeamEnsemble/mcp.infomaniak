@@ -9,6 +9,7 @@ Each module registers with the kernel:
 
 - Stable module ID, display name and namespace.
 - MCP tools/resources and handlers; module-owned HTTP routes where needed.
+- Optional [MCP App](mcp.md#mcp-apps) templates on focused tools (`Tool.ui`), with module-owned versioned URIs and view scripts. Shared bridge, styling and resource dispatch belong to the kernel.
 - Credential provider, required API scopes, configuration and dependencies. Modules with the same provider share one stored credential per user; Mail, Calendar, kDrive and kChat use `infomaniak`.
 - Permissions required by each operation.
 - Admin options/configuration fields and health/status reporting.

@@ -270,6 +270,19 @@ async fn resources(
         let uri = params["uri"]
             .as_str()
             .ok_or_else(|| Error::invalid("Resource URI is required"))?;
+        if uri.starts_with("ui://") {
+            for module in &app.modules.modules {
+                for tool in &module.tools {
+                    if let Some(ui) = &tool.ui
+                        && ui.uri == uri
+                    {
+                        oauth::allowed(app, actor, module.id, tool.write)?;
+                        return Ok(ui.read());
+                    }
+                }
+            }
+            return Err(Error::invalid("Unknown app resource URI"));
+        }
         let module = app
             .modules
             .modules
@@ -346,6 +359,17 @@ async fn resources(
         (0, None)
     };
     let mut items = vec![];
+    if cursor.is_none() {
+        for module in &app.modules.modules {
+            for tool in &module.tools {
+                if let Some(ui) = &tool.ui
+                    && oauth::allowed(app, actor, module.id, tool.write).is_ok()
+                {
+                    items.push(ui.metadata());
+                }
+            }
+        }
+    }
     let mut out = json!({});
     if let Some(module) = available.get(index) {
         params["cursor"] = upstream.map(Value::String).unwrap_or(Value::Null);

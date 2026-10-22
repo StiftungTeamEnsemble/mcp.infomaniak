@@ -186,6 +186,19 @@ pub fn module() -> Module {
             .unwrap()
             .push(json!("drive_id"));
     }
+    let mut show = tools
+        .iter()
+        .find(|t| t.name == "kdrive_list")
+        .unwrap()
+        .clone();
+    show.name = "kdrive_show_folder".into();
+    show.description = "Show a kDrive folder inline as an expandable tree. Lists one page; the app loads subfolders and continuation on demand.".into();
+    show.ui = Some(crate::mcp_apps::Ui {
+        uri: "ui://kdrive/folder-v1.html",
+        title: "kDrive folder",
+        script: include_str!("kdrive/app.js"),
+    });
+    tools.push(show);
     Module {
         id: "kdrive",
         name: "kDrive",
@@ -205,6 +218,8 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
     let args = &c.args;
     let drive = numeric(args, "drive_id", 0);
     let file = numeric(args, "file_id", 1);
+    let show = name == "kdrive_show_folder";
+    let name = if show { "kdrive_list" } else { &name };
     let op = name
         .strip_prefix("kdrive_")
         .ok_or_else(|| Error::invalid("Unknown kDrive operation"))?;
@@ -437,7 +452,33 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
     );
     out["has_more"] = json!(has_more);
     out["cursor"] = cursor;
+    if show {
+        out["context"]["folder_name"] = folder_name(&c, &v3, drive, file).await?;
+    }
     Ok(out)
+}
+
+/// Optional view enrichment: a failed lookup leaves the name null; only an
+/// invalid token stops the call.
+async fn folder_name(c: &Call, v3: &str, drive: i64, file: i64) -> Result<Value> {
+    let response = c
+        .app
+        .provider
+        .request(
+            &c.token,
+            Method::GET,
+            format!("{v3}/files/{file}"),
+            &[],
+            None,
+        )
+        .await;
+    match response {
+        Ok(folder) => Ok(file_metadata(data(folder), drive, Some(file), false)
+            .map(|folder| folder["name"].clone())
+            .unwrap_or(Value::Null)),
+        Err(e) if e.code == "reconnection_required" => Err(e),
+        Err(_) => Ok(Value::Null),
+    }
 }
 
 fn file_metadata(

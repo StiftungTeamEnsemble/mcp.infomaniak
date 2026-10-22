@@ -62,14 +62,20 @@ pub struct Tool {
     pub external: bool,
     pub schema: Value,
     pub output: Value,
+    pub ui: Option<crate::mcp_apps::Ui>,
 }
 impl Tool {
     pub fn metadata(&self, module: &str) -> Value {
         let scope = format!("{module}:{}", if self.write { "write" } else { "read" });
-        json!({"name":self.name,"description":self.description,"inputSchema":self.schema,
+        let mut metadata = json!({"name":self.name,"description":self.description,"inputSchema":self.schema,
             "outputSchema":{"type":"object","properties":{"data":self.output,"context":{"type":"object"},"has_more":{"type":"boolean"},"cursor":{"type":["string","null"]},"next_offset":{"type":["integer","null"]},"content":{"type":"array"}},"required":["data","context"]},
             "annotations":{"readOnlyHint":!self.write,"destructiveHint":self.destructive,"idempotentHint":!self.write,"openWorldHint":self.external},
-            "securitySchemes":[{"type":"oauth2","scopes":[scope]}]})
+            "securitySchemes":[{"type":"oauth2","scopes":[scope]}]});
+        if let Some(ui) = &self.ui {
+            // Views call their own tool for follow-up pages and branches.
+            metadata["_meta"] = json!({"ui":{"resourceUri":ui.uri,"visibility":["model","app"]},"openai/outputTemplate":ui.uri,"openai/widgetAccessible":true});
+        }
+        metadata
     }
     pub fn validate(&self, args: &Value) -> Result<()> {
         validate(args, &self.schema)
@@ -95,6 +101,7 @@ impl Registry {
             HashSet::new(),
         );
         let mut schemes = HashSet::new();
+        let mut ui_uris = HashSet::new();
         for m in &modules {
             if m.id.is_empty()
                 || m.namespace.is_empty()
@@ -110,6 +117,10 @@ impl Registry {
                 || m.tools.iter().any(|t| {
                     !t.name.starts_with(&format!("{}_", m.namespace))
                         || !tools.insert(t.name.clone())
+                        || t.ui.as_ref().is_some_and(|ui| {
+                            !ui.uri.starts_with(&format!("ui://{}/", m.id))
+                                || !ui_uris.insert(ui.uri)
+                        })
                 })
             {
                 return Err(Error::config(
@@ -177,6 +188,7 @@ pub fn tool(
         external,
         schema: json!({"type":"object","properties":fields.into_iter().map(|(k,v)|(k.into(),v)).collect::<serde_json::Map<_,_>>(),"required":required,"additionalProperties":false}),
         output: json!({"type":"object"}),
+        ui: None,
     }
 }
 fn validate(value: &Value, schema: &Value) -> Result<()> {

@@ -16,6 +16,7 @@ Except `mail_list_mailboxes`, every tool accepts `mailbox_uuid?`, defaulting to 
 - `mail_list_emails(folder_id, limit=50, offset=0, unseen?, flagged?)` → thread summaries; reject both filters being true.
 - `mail_search_emails(query?, from?, to?, subject?, since?, before?, folder_id?, limit=50, offset=0)` → matching messages; require a search criterion; dates use `YYYY-MM-DD`; omitted folder searches all folders.
 - `mail_read_email(folder_id, message_id)` → plain/HTML bodies, headers, participants, state and attachment metadata.
+- `mail_show_email(folder_id, message_id)` → the same authorised read in an [inline MCP App](../mcp.md#mcp-apps), with participants, safe body formatting and attachment metadata; accepts the same optional mailbox selector.
 - `mail_download_attachment(folder_id, message_id, attachment_id)` → filename, MIME type, size and typed image/resource content.
 
 ## Sending and drafts

@@ -10,6 +10,7 @@ Every tool additionally requires numeric `drive_id` for a user-authorised drive;
 
 - `kdrive_search(query, directory_id?, depth?, cursor?)` → drive-wide or selected-folder matches; folder depth: `child|unlimited`.
 - `kdrive_list(file_id=1, type?, cursor?)` → folder items, `has_more`, continuation `cursor`; type: `file|dir`.
+- `kdrive_show_folder(file_id=1, type?, cursor?)` → the same authorised folder page plus `context.folder_name` in an [inline MCP App](../mcp.md#mcp-apps), with an expandable tree. Each branch loads and paginates on demand; repeated ancestors and branches deeper than 16 levels require opening kDrive.
 - `kdrive_info(file_id)` → item metadata.
 - `kdrive_recents(type?, cursor?)` → recent items; type: `file|dir|vault`.
 - `kdrive_shared_with_me(type?, cursor?)` → shared items; same type filter.
