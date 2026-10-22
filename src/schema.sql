@@ -1,7 +1,4 @@
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-PRAGMA secure_delete=ON;
-PRAGMA journal_size_limit=1048576;
+-- Current schema for fresh databases (version migrations::VERSION); change existing databases through src/migrations.rs.
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,issuer TEXT NOT NULL,subject TEXT NOT NULL,email TEXT NOT NULL,name TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('active','pending','suspended')),admin INTEGER NOT NULL DEFAULT 0,UNIQUE(issuer,subject));
 CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1),manual_approval INTEGER NOT NULL DEFAULT 0);
 INSERT OR IGNORE INTO settings(id) VALUES(1);
@@ -9,7 +6,7 @@ CREATE TABLE IF NOT EXISTS modules(module TEXT PRIMARY KEY,enabled INTEGER NOT N
 CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS memberships(user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,PRIMARY KEY(user_id,group_id));
 CREATE TABLE IF NOT EXISTS policies(kind TEXT CHECK(kind IN ('user','group')),principal INTEGER NOT NULL,module TEXT REFERENCES modules(module),level INTEGER NOT NULL CHECK(level BETWEEN 0 AND 2),PRIMARY KEY(kind,principal,module));
-CREATE TABLE IF NOT EXISTS credentials(user_id INTEGER REFERENCES users(id),module TEXT REFERENCES modules(module),secret BLOB NOT NULL,scopes TEXT NOT NULL,expires INTEGER NOT NULL,health TEXT NOT NULL DEFAULT 'connected',checked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,module));
+CREATE TABLE IF NOT EXISTS connections(user_id INTEGER REFERENCES users(id),provider TEXT NOT NULL,secret BLOB NOT NULL,scopes TEXT NOT NULL,expires INTEGER NOT NULL,health TEXT NOT NULL DEFAULT 'connected',checked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,provider));
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id INTEGER REFERENCES users(id),csrf TEXT NOT NULL,expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS flows(hash TEXT PRIMARY KEY,binding TEXT NOT NULL,secret BLOB NOT NULL,expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS clients(id TEXT PRIMARY KEY,name TEXT NOT NULL,redirects TEXT NOT NULL,created INTEGER NOT NULL);

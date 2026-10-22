@@ -32,6 +32,7 @@ pub fn module() -> Module {
         id: "kchat",
         name: "kChat",
         namespace: "kchat",
+        provider: INFOMANIAK,
         scopes: vec!["kchat"],
         routes: vec![],
         resources: None,

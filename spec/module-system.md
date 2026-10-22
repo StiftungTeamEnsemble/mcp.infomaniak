@@ -9,7 +9,7 @@ Each module registers with the kernel:
 
 - Stable module ID, display name and namespace.
 - MCP tools/resources and handlers; module-owned HTTP routes where needed.
-- Required API scopes, credentials, configuration and dependencies.
+- Credential provider, required API scopes, configuration and dependencies. Modules with the same provider share one stored credential per user; Mail, Calendar, kDrive and kChat use `infomaniak`.
 - Permissions required by each operation.
 - Admin options/configuration fields and health/status reporting.
 

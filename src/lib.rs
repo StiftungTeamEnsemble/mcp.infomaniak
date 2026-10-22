@@ -2,6 +2,7 @@ pub mod config;
 pub mod crypto;
 pub mod identity;
 pub mod mcp;
+pub mod migrations;
 pub mod modules;
 pub mod oauth;
 pub mod store;
@@ -185,6 +186,7 @@ impl App {
             for m in &modules.modules {
                 c.execute("INSERT OR IGNORE INTO modules(module) VALUES(?)", [m.id])?;
             }
+            migrations::run(c, &config.encryption_key)?;
             Ok(())
         })?;
         Ok(Self {

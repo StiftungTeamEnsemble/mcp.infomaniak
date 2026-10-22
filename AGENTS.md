@@ -5,7 +5,8 @@
 - Follow the [module contract](spec/module-system.md) when adding or changing services.
 - Keep module tool names, arguments and results explicit; link provider adapters for upstream API calls.
 - Keep deployment variables and domain restrictions in the [environment spec](spec/environment.md). Keep `compose.yaml` platform-portable (Coolify uses it alone); local-only settings belong in `compose.override.yaml`.
-- Preserve [browser-based sign-in](spec/identity.md) when changing authentication. Service access uses guided [personal API tokens](spec/identity.md#infomaniak-authorisation) that must match the signed-in account; keep that setup simple.
+- Preserve [browser-based sign-in](spec/identity.md) when changing authentication. Service access uses guided [personal API tokens](spec/identity.md#infomaniak-authorisation) that must match the signed-in account; store one credential per user and provider (all Infomaniak services share `infomaniak`) and keep that setup simple.
+- Change existing databases only through a new step in `src/migrations.rs` (SQLite `user_version`); keep `src/schema.sql` the current fresh-database schema.
 - Keep [verification status](spec/development.md#verification-status) current; provider mocks never satisfy the two-employee or real-client integration prerequisites.
 - Verify continuation through actual tool/resource inputs, including schema bounds, and recheck the exact client token or browser session after asynchronous credential renewal; cover both with integration regressions in `test/`.
 - Preserve [transport authorisation errors and explicit mutation outcomes](spec/mcp.md#behaviour-and-results); record safe recovery context before every module write, including across tool deadlines. Never hide known provider limitations behind successful results.

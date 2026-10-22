@@ -39,10 +39,14 @@ pub struct HttpRoute {
     pub write: bool,
     pub handler: axum::routing::MethodRouter<App>,
 }
+/// Credential provider shared by all Infomaniak services: one token per user.
+pub const INFOMANIAK: &str = "infomaniak";
 pub struct Module {
     pub id: &'static str,
     pub name: &'static str,
     pub namespace: &'static str,
+    /// Modules with the same provider share one stored credential per user.
+    pub provider: &'static str,
     pub scopes: Vec<&'static str>,
     pub tools: Vec<Tool>,
     pub routes: Vec<HttpRoute>,
@@ -94,6 +98,7 @@ impl Registry {
         for m in &modules {
             if m.id.is_empty()
                 || m.namespace.is_empty()
+                || m.provider.is_empty()
                 || !ids.insert(m.id)
                 || !namespaces.insert(m.namespace)
                 || m.routes.iter().any(|r| {

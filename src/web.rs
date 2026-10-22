@@ -1,4 +1,4 @@
-use crate::{App, Error, Result, crypto, identity, oauth, store::now};
+use crate::{App, Error, Result, crypto, identity, modules::INFOMANIAK, oauth, store::now};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, Query, Request, State},
@@ -74,7 +74,7 @@ pub fn router(app: App) -> Router {
         .route("/api/logout", post(logout))
         .route("/api/connect/{module}", post(connect))
         .route("/api/token", post(save_token))
-        .route("/api/disconnect/{module}", post(disconnect))
+        .route("/api/disconnect/{provider}", post(disconnect))
         .route("/api/clients/{id}/revoke", post(revoke_client))
         .route("/api/clients/{id}/scopes", post(edit_client))
         .route("/api/authorize", get(consent_view).post(oauth::consent))
@@ -241,7 +241,7 @@ async fn me(State(app): State<App>, headers: HeaderMap) -> Result<Json<Value>> {
     let mut out = app.store.user_summary(&user)?;
     let mut modules = vec![];
     for m in &app.modules.modules {
-        modules.push(json!({"id":m.id,"name":m.name,"enabled":app.store.module_enabled(m.id)?,"level":app.store.local_level(user.id,m.id)?,"scopes":m.scopes}));
+        modules.push(json!({"id":m.id,"name":m.name,"provider":m.provider,"enabled":app.store.module_enabled(m.id)?,"level":app.store.local_level(user.id,m.id)?,"scopes":m.scopes}));
     }
     out["modules"] = json!(modules);
     let mut scopes = vec![];
@@ -356,22 +356,28 @@ async fn save_token(
             "This token belongs to another Infomaniak account",
         ));
     }
+    identity::save_credential(
+        &app,
+        user.id,
+        INFOMANIAK,
+        &identity::Credential {
+            access_token: token.into(),
+            refresh_token: None,
+        },
+        identity::PERSONAL_SCOPES,
+        now() + PERSONAL_TOKEN_LIFETIME,
+    )?;
+    // The token serves every Infomaniak service the user may use now or is granted later.
     let mut connected = vec![];
-    for module in &app.modules.modules {
-        if !app.store.module_enabled(module.id)? || app.store.local_level(user.id, module.id)? == 0
-        {
-            continue;
+    for module in app
+        .modules
+        .modules
+        .iter()
+        .filter(|m| m.provider == INFOMANIAK)
+    {
+        if app.store.module_enabled(module.id)? && app.store.local_level(user.id, module.id)? > 0 {
+            connected.push(module.id);
         }
-        let secret = crypto::seal(
-            &app.config.encryption_key,
-            &format!("credential:{}:{}", user.id, module.id),
-            &serde_json::to_vec(&identity::Credential {
-                access_token: token.into(),
-                refresh_token: None,
-            })?,
-        )?;
-        app.store.with(|c|{c.execute("INSERT INTO credentials(user_id,module,secret,scopes,expires) VALUES(?,?,?,?,?) ON CONFLICT(user_id,module) DO UPDATE SET secret=excluded.secret,scopes=excluded.scopes,expires=excluded.expires,health='connected',checked=0",params![user.id,module.id,secret,module.scopes.join(" "),now()+PERSONAL_TOKEN_LIFETIME])?;Ok(())})?;
-        connected.push(module.id);
     }
     app.store.audit(
         request_id(&headers),
@@ -385,15 +391,15 @@ async fn save_token(
 async fn disconnect(
     State(app): State<App>,
     headers: HeaderMap,
-    Path(module): Path<String>,
+    Path(provider): Path<String>,
 ) -> Result<Json<Value>> {
     let (user, _) = session(&app, &headers, true)?;
     csrf(&app, &headers)?;
-    app.modules.get(&module)?;
+    known_provider(&app, &provider)?;
     app.store.with(|c| {
         c.execute(
-            "DELETE FROM credentials WHERE user_id=? AND module=?",
-            params![user.id, module],
+            "DELETE FROM connections WHERE user_id=? AND provider=?",
+            params![user.id, provider],
         )?;
         Ok(())
     })?;
@@ -407,6 +413,12 @@ async fn disconnect(
     Ok(Json(
         json!({"ok":true,"upstream_revocation":"Local access removed. Delete your API token in the Infomaniak Manager to invalidate it upstream."}),
     ))
+}
+fn known_provider(app: &App, provider: &str) -> Result<()> {
+    if !app.modules.modules.iter().any(|m| m.provider == provider) {
+        return Err(Error::invalid("Unknown credential provider"));
+    }
+    Ok(())
 }
 async fn revoke_client(
     State(app): State<App>,
@@ -538,8 +550,8 @@ async fn admin_view(State(app): State<App>, headers: HeaderMap) -> Result<Json<V
         let memberships=stmt.query_map([],|r|Ok(json!({"user_id":r.get::<_,i64>(0)?,"group_id":r.get::<_,i64>(1)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut stmt=c.prepare("SELECT kind,principal,module,level FROM policies LIMIT 10000")?;
         let policies=stmt.query_map([],|r|Ok(json!({"kind":r.get::<_,String>(0)?,"principal":r.get::<_,i64>(1)?,"module":r.get::<_,String>(2)?,"level":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        let mut stmt=c.prepare("SELECT user_id,module,scopes,expires,health,checked FROM credentials LIMIT 1500")?;
-        let connections=stmt.query_map([],|r|Ok(json!({"user_id":r.get::<_,i64>(0)?,"module":r.get::<_,String>(1)?,"scopes":r.get::<_,String>(2)?,"expires":r.get::<_,i64>(3)?,"health":r.get::<_,String>(4)?,"checked":r.get::<_,i64>(5)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut stmt=c.prepare("SELECT user_id,provider,scopes,expires,health,checked FROM connections LIMIT 1500")?;
+        let connections=stmt.query_map([],|r|Ok(json!({"user_id":r.get::<_,i64>(0)?,"provider":r.get::<_,String>(1)?,"scopes":r.get::<_,String>(2)?,"expires":r.get::<_,i64>(3)?,"health":r.get::<_,String>(4)?,"checked":r.get::<_,i64>(5)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut stmt=c.prepare("SELECT at,severity,request_id,actor,client,action,outcome FROM logs ORDER BY id DESC LIMIT 100")?;
         let logs=stmt.query_map([],|r|Ok(json!({"at":r.get::<_,i64>(0)?,"severity":r.get::<_,String>(1)?,"request_id":r.get::<_,String>(2)?,"actor":r.get::<_,Option<i64>>(3)?,"client":r.get::<_,Option<String>>(4)?,"action":r.get::<_,String>(5)?,"outcome":r.get::<_,String>(6)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let manual:bool=c.query_row("SELECT manual_approval FROM settings WHERE id=1",[],|r|r.get(0))?;
@@ -594,7 +606,7 @@ pub enum AdminChange {
     },
     Revoke {
         user_id: i64,
-        module: String,
+        provider: String,
     },
 }
 async fn admin_change(
@@ -635,7 +647,7 @@ async fn admin_change(
                 if !c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?)"),[principal],|r|r.get::<_,bool>(0))? {return Err(Error::invalid("Unknown policy principal"))}
                 c.execute("INSERT INTO policies(kind,principal,module,level) VALUES(?,?,?,?) ON CONFLICT(kind,principal,module) DO UPDATE SET level=excluded.level",params![kind,principal,module,level])?;
             },
-            AdminChange::Revoke {user_id,module}=>{app.modules.get(&module)?;c.execute("DELETE FROM credentials WHERE user_id=? AND module=?",params![user_id,module])?;},
+            AdminChange::Revoke {user_id,provider}=>{known_provider(&app,&provider)?;c.execute("DELETE FROM connections WHERE user_id=? AND provider=?",params![user_id,provider])?;},
         } Ok(())
     })?;
     app.store.audit(

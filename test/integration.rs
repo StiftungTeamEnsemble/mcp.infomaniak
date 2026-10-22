@@ -277,9 +277,7 @@ impl Harness {
             c.execute("UPDATE modules SET enabled=1,verification='Mock verification'",[])?;
             c.execute("UPDATE policies SET level=2",[])?;Ok(())
         }).unwrap();
-        for module in ["mail", "calendar", "kdrive", "kchat"] {
-            credential(&app, user.id, module, "delegated-a", now() + 3600);
-        }
+        credential(&app, user.id, "delegated-a", now() + 3600);
         Self {
             app,
             mock,
@@ -384,10 +382,10 @@ fn cfg() -> Config {
         kchat_team: Some("ensemble".into()),
     }
 }
-fn credential(app: &App, user: i64, module: &str, token: &str, expires: i64) {
+fn credential(app: &App, user: i64, token: &str, expires: i64) {
     let secret = crypto::seal(
         &app.config.encryption_key,
-        &format!("credential:{user}:{module}"),
+        &ensemble_mcp::identity::credential_context(user, modules::INFOMANIAK),
         &serde_json::to_vec(&Credential {
             access_token: token.into(),
             refresh_token: Some("refresh-token".into()),
@@ -395,7 +393,22 @@ fn credential(app: &App, user: i64, module: &str, token: &str, expires: i64) {
         .unwrap(),
     )
     .unwrap();
-    app.store.with(|c|{c.execute("INSERT OR REPLACE INTO credentials(user_id,module,secret,scopes,expires) VALUES(?,?,?,?,?)",params![user,module,secret,app.modules.get(module)?.scopes.join(" "),expires])?;Ok(())}).unwrap();
+    let mut scopes: Vec<&str> = app
+        .modules
+        .modules
+        .iter()
+        .flat_map(|m| m.scopes.clone())
+        .collect();
+    scopes.dedup();
+    app.store
+        .with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO connections(user_id,provider,secret,scopes,expires) VALUES(?,?,?,?,?)",
+                params![user, modules::INFOMANIAK, secret, scopes.join(" "), expires],
+            )?;
+            Ok(())
+        })
+        .unwrap();
 }
 struct Reply {
     status: StatusCode,
@@ -669,7 +682,7 @@ async fn resources_recheck_client_and_policy_after_provider_renewal() {
         ),
     ] {
         let h = Harness::new().await;
-        credential(&h.app, h.user.id, "kdrive", "expired", now() - 1);
+        credential(&h.app, h.user.id, "expired", now() - 1);
         let started = Arc::new(tokio::sync::Notify::new());
         let resume = Arc::new(tokio::sync::Notify::new());
         h.mock.lock().unwrap().refresh_gate = Some((started.clone(), resume.clone()));
@@ -735,7 +748,7 @@ async fn tools_filter_and_direct_calls_apply_live_policy() {
 #[tokio::test]
 async fn consent_and_credential_removal_take_effect_on_next_operation() {
     let h = Harness::new().await;
-    h.sql("DELETE FROM credentials WHERE module='kdrive'");
+    h.sql("DELETE FROM connections");
     assert_eq!(
         h.call("kdrive_info", json!({"drive_id":9,"file_id":42}))
             .await["error"],
@@ -747,7 +760,7 @@ async fn consent_and_credential_removal_take_effect_on_next_operation() {
 #[tokio::test]
 async fn personal_tokens_must_belong_to_the_user_and_connect_only_granted_services() {
     let h = Harness::new().await;
-    h.sql("DELETE FROM credentials; UPDATE policies SET level=0 WHERE module='calendar'");
+    h.sql("DELETE FROM connections; UPDATE policies SET level=0 WHERE module='calendar'");
     let headers = h.headers();
     let save = |token: &str| {
         request(
@@ -784,7 +797,7 @@ async fn personal_tokens_must_belong_to_the_user_and_connect_only_granted_servic
         h.app
             .store
             .with(
-                |c| Ok(c.query_row("SELECT COUNT(*) FROM credentials", [], |r| r
+                |c| Ok(c.query_row("SELECT COUNT(*) FROM connections", [], |r| r
                     .get::<_, i64>(0))?)
             )
             .unwrap()
@@ -853,7 +866,7 @@ async fn users_can_edit_client_grants_within_consent_rules() {
             .any(|n| n == "mail_send_email" || n.starts_with("kdrive_"))
     );
     // Existing access may be kept after its service becomes unavailable, but not widened.
-    h.sql("DELETE FROM credentials WHERE module='calendar'");
+    h.sql("UPDATE modules SET enabled=0 WHERE module='calendar'");
     assert_eq!(
         edit(json!(["mail:read", "calendar:read"])).await.status,
         200
@@ -908,7 +921,7 @@ async fn upstream_reconnection_failures_keep_http_status_for_tools_and_resources
             let h = Harness::new().await;
             h.sql("INSERT INTO resource_refs(user_id,drive_id,file_id,name,mime) VALUES(1,9,42,'report.txt','text/plain')");
             if target == "POST /token" {
-                credential(&h.app, h.user.id, "kdrive", "expired", now() - 1);
+                credential(&h.app, h.user.id, "expired", now() - 1);
             }
             h.mock
                 .lock()
@@ -1041,7 +1054,7 @@ async fn two_users_never_select_each_others_credentials() {
             "Bob",
         )
         .unwrap();
-    credential(&h.app, bob.id, "kdrive", "delegated-b", now() + 3600);
+    credential(&h.app, bob.id, "delegated-b", now() + 3600);
     let out = h.call("kdrive_list", json!({"drive_id":9})).await;
     assert_eq!(result(&out)["data"][0]["name"], "Alice's file");
     assert!(
@@ -3611,7 +3624,7 @@ async fn operational_logs_exclude_secrets_and_content() {
 #[tokio::test]
 async fn refresh_is_automatic_and_serialized_per_user_connection() {
     let h = Harness::new().await;
-    credential(&h.app, 1, "kdrive", "expired", now() - 1);
+    credential(&h.app, 1, "expired", now() - 1);
     let (a, b) = tokio::join!(
         h.call("kdrive_info", json!({"drive_id":9,"file_id":42})),
         h.call("kdrive_info", json!({"drive_id":9,"file_id":42}))
@@ -3623,7 +3636,7 @@ async fn refresh_is_automatic_and_serialized_per_user_connection() {
 #[tokio::test]
 async fn client_revocation_during_provider_renewal_prevents_dispatch() {
     let h = Harness::new().await;
-    credential(&h.app, h.user.id, "kdrive", "expired", now() - 1);
+    credential(&h.app, h.user.id, "expired", now() - 1);
     let started = Arc::new(tokio::sync::Notify::new());
     let resume = Arc::new(tokio::sync::Notify::new());
     h.mock.lock().unwrap().refresh_gate = Some((started.clone(), resume.clone()));
@@ -4005,11 +4018,11 @@ async fn provider_outages_never_retry_mutations_or_disable_other_modules() {
         .app
         .store
         .with(|c| {
-            Ok(c.query_row(
-                "SELECT health FROM credentials WHERE user_id=1 AND module='kdrive'",
-                [],
-                |r| r.get(0),
-            )?)
+            Ok(
+                c.query_row("SELECT health FROM connections WHERE user_id=1", [], |r| {
+                    r.get(0)
+                })?,
+            )
         })
         .unwrap();
     assert_eq!(health, "mutation_uncertain");
@@ -4034,7 +4047,7 @@ async fn sqlite_logs_sessions_and_credentials_survive_reopening() {
         .unwrap();
     let secret = crypto::seal(
         &cfg().encryption_key,
-        "credential:1:mail",
+        "credential:1:infomaniak",
         b"persistent-secret",
     )
     .unwrap();
@@ -4042,7 +4055,7 @@ async fn sqlite_logs_sessions_and_credentials_survive_reopening() {
         .with(|c| {
             c.execute("INSERT INTO modules(module) VALUES('mail')", [])?;
             c.execute(
-                "INSERT INTO credentials(user_id,module,secret,scopes,expires) VALUES(1,'mail',?,'workspace:mail user_info',?)",
+                "INSERT INTO connections(user_id,provider,secret,scopes,expires) VALUES(1,'infomaniak',?,'*',?)",
                 params![secret, now() + 3600],
             )?;
             c.execute(
@@ -4077,13 +4090,12 @@ async fn sqlite_logs_sessions_and_credentials_survive_reopening() {
     assert_eq!(count, 1);
     reopened
         .with(|c| {
-            let secret: Vec<u8> = c.query_row(
-                "SELECT secret FROM credentials WHERE user_id=1 AND module='mail'",
-                [],
-                |r| r.get(0),
-            )?;
+            let secret: Vec<u8> =
+                c.query_row("SELECT secret FROM connections WHERE user_id=1", [], |r| {
+                    r.get(0)
+                })?;
             assert_eq!(
-                crypto::open(&cfg().encryption_key, "credential:1:mail", &secret).unwrap(),
+                crypto::open(&cfg().encryption_key, "credential:1:infomaniak", &secret).unwrap(),
                 b"persistent-secret"
             );
             assert_eq!(
@@ -4148,7 +4160,7 @@ async fn newly_verified_ineligible_email_invalidates_old_sessions_and_other_serv
     for refresh in [false, true] {
         let h = Harness::new().await;
         if refresh {
-            credential(&h.app, h.user.id, "kdrive", "expired", now() - 1);
+            credential(&h.app, h.user.id, "expired", now() - 1);
             h.mock.lock().unwrap().claims = json!({"email":"alice@outside.example"});
             let denied = h
                 .rpc(
@@ -4210,7 +4222,7 @@ async fn renewal_updates_only_validated_claims_for_the_same_identity() {
         ),
     ] {
         let h = Harness::new().await;
-        credential(&h.app, h.user.id, "kdrive", "expired", now() - 1);
+        credential(&h.app, h.user.id, "expired", now() - 1);
         h.mock.lock().unwrap().claims = claims;
         h.rpc(
             "tools/call",
@@ -4329,7 +4341,7 @@ async fn module_http_routes_recheck_browser_logout_after_credential_renewal() {
     });
     let mut app = h.app.clone();
     app.modules = Arc::new(modules::Registry::new(vec![module]).unwrap());
-    credential(&app, h.user.id, "mail", "expired", now() - 1);
+    credential(&app, h.user.id, "expired", now() - 1);
     let started = Arc::new(tokio::sync::Notify::new());
     let resume = Arc::new(tokio::sync::Notify::new());
     h.mock.lock().unwrap().refresh_gate = Some((started.clone(), resume.clone()));
@@ -4369,6 +4381,7 @@ async fn registered_modules_supply_oauth_scopes_without_kernel_edits() {
         id: "notes",
         name: "Notes",
         namespace: "notes",
+        provider: modules::INFOMANIAK,
         scopes: vec!["notes"],
         tools: vec![],
         routes: vec![],
@@ -4378,7 +4391,7 @@ async fn registered_modules_supply_oauth_scopes_without_kernel_edits() {
     let mut app = h.app.clone();
     app.modules = Arc::new(modules::Registry::new(registered).unwrap());
     h.sql("INSERT INTO modules(module,enabled,verification) VALUES('notes',1,'mock'); INSERT INTO policies(kind,principal,module,level) VALUES('user',1,'notes',2)");
-    credential(&app, h.user.id, "notes", "notes-token", now() + 3600);
+    credential(&app, h.user.id, "notes-token", now() + 3600);
     let scopes = oauth::scopes(&app);
     assert_eq!(scopes.len(), 10);
     for path in [
@@ -4760,4 +4773,208 @@ async fn calendar_updates_send_only_writable_fields() {
     assert_eq!(body["description"], "");
     assert_eq!(body["attendees"][0]["address"], "person@example.org");
     assert_eq!(body["bookable_resource_id"], "room-1");
+}
+
+#[tokio::test]
+async fn one_personal_token_serves_services_granted_later() {
+    let h = Harness::new().await;
+    h.sql("UPDATE users SET admin=1; DELETE FROM connections; UPDATE modules SET enabled=0 WHERE module='kchat'");
+    let saved = request(
+        &h.app,
+        "POST",
+        "/api/token",
+        json!({"token":"personal-a"}),
+        &h.headers(),
+    )
+    .await;
+    assert_eq!(saved.status, 200);
+    assert!(!saved.value["connected"].to_string().contains("kchat"));
+    let enable = json!({"action":"module","module":"kchat","enabled":true,"verification":"Mock verification","default_level":2});
+    assert_eq!(h.admin(enable).await.status, 200);
+    let out = h.call("kchat_list_my_channels", json!({})).await;
+    assert_eq!(out["result"]["isError"], false, "{out}");
+    assert_eq!(
+        h.mock.lock().unwrap().calls.last().unwrap().2,
+        "Bearer personal-a"
+    );
+    let me = request(&h.app, "GET", "/api/me", Value::Null, &h.headers()).await;
+    assert_eq!(me.value["connections"][0]["provider"], "infomaniak");
+    assert_eq!(me.value["connections"][0]["scopes"], "*");
+    assert_eq!(me.value["connections"][0]["health"], "connected");
+    // Disconnect removes the one token for every service.
+    let out = request(
+        &h.app,
+        "POST",
+        "/api/disconnect/infomaniak",
+        Value::Null,
+        &h.headers(),
+    )
+    .await;
+    assert_eq!(out.status, 200);
+    for (tool, args) in [
+        ("kchat_list_my_channels", json!({})),
+        ("kdrive_info", json!({"drive_id":9,"file_id":42})),
+    ] {
+        assert_eq!(h.call(tool, args).await["error"], "reconnection_required");
+    }
+}
+
+#[tokio::test]
+async fn per_service_credentials_migrate_to_one_credential_per_user() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.sqlite");
+    let store = Store::open(path.to_str().unwrap()).unwrap();
+    let alice = store
+        .admit(
+            &cfg(),
+            ISSUER,
+            "employee-a",
+            "alice@team-ensemble.ch",
+            "Alice",
+        )
+        .unwrap();
+    let bob = store
+        .admit(&cfg(), ISSUER, "employee-b", "bob@team-ensemble.ch", "Bob")
+        .unwrap();
+    let key = cfg().encryption_key;
+    let legacy = |user: i64, module: &str, token: &str, refresh: Option<&str>| {
+        crypto::seal(
+            &key,
+            &format!("credential:{user}:{module}"),
+            &serde_json::to_vec(&Credential {
+                access_token: token.into(),
+                refresh_token: refresh.map(String::from),
+            })
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    store
+        .with(|c| {
+            c.execute_batch("DROP TABLE connections; PRAGMA user_version=0; CREATE TABLE credentials(user_id INTEGER,module TEXT,secret BLOB NOT NULL,scopes TEXT NOT NULL,expires INTEGER NOT NULL,health TEXT NOT NULL DEFAULT 'connected',checked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,module))")?;
+            for (user, module, secret, scopes, health, checked) in [
+                (alice.id, "mail", legacy(alice.id, "mail", "rejected-a", None), "workspace:mail user_info", "reconnection_required", 9),
+                (alice.id, "kdrive", legacy(alice.id, "kdrive", "personal-a", None), "drive user_info", "connected", 5),
+                (alice.id, "calendar", vec![0; 40], "workspace:calendar user_info", "connected", 10),
+                (bob.id, "mail", legacy(bob.id, "mail", "delegated-b", Some("refresh-b")), "workspace:mail user_info", "connected", 1),
+            ] {
+                c.execute(
+                    "INSERT INTO credentials(user_id,module,secret,scopes,expires,health,checked) VALUES(?,?,?,?,?,?,?)",
+                    params![user, module, secret, scopes, now() + 3600, health, checked],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let metadata = Metadata {
+        issuer: ISSUER.into(),
+        authorization_endpoint: String::new(),
+        token_endpoint: String::new(),
+        jwks_uri: String::new(),
+        code_challenge_methods_supported: vec!["S256".into()],
+    };
+    let provider = Provider::with_endpoints(
+        metadata,
+        Provider::http_client().unwrap(),
+        String::new(),
+        String::new(),
+    );
+    let app = App::new(cfg(), store, provider).unwrap();
+    app.store
+        .with(|c| {
+            let legacy: bool = c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='credentials')",
+                [],
+                |r| r.get(0),
+            )?;
+            assert!(!legacy);
+            let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            assert_eq!(version, ensemble_mcp::migrations::VERSION);
+            for (user, token, scopes, health) in [
+                (alice.id, "personal-a", "*", "connected"),
+                (
+                    bob.id,
+                    "delegated-b",
+                    "workspace:mail user_info",
+                    "connected",
+                ),
+            ] {
+                let (secret, stored_scopes, stored_health): (Vec<u8>, String, String) = c
+                    .query_row(
+                        "SELECT secret,scopes,health FROM connections WHERE user_id=? AND provider='infomaniak'",
+                        [user],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )?;
+                let credential: Credential = serde_json::from_slice(
+                    &crypto::open(&key, &format!("credential:{user}:infomaniak"), &secret).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(credential.access_token, token);
+                assert_eq!(stored_scopes, scopes);
+                assert_eq!(stored_health, health);
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn credentials_are_shared_only_within_a_provider() {
+    let h = Harness::new().await;
+    let mut registered = modules::Registry::builtin().unwrap().modules;
+    registered.push(modules::Module {
+        id: "notes",
+        name: "Notes",
+        namespace: "notes",
+        provider: "notes-provider",
+        scopes: vec!["notes"],
+        tools: vec![],
+        routes: vec![],
+        resources: None,
+        handler: |_, _| Box::pin(async { Ok(json!({})) }),
+    });
+    let mut app = h.app.clone();
+    app.modules = Arc::new(modules::Registry::new(registered).unwrap());
+    h.sql("INSERT INTO modules(module,enabled,verification) VALUES('notes',1,'mock'); INSERT INTO policies(kind,principal,module,level) VALUES('user',1,'notes',2)");
+    assert!(
+        app.provider
+            .access_token(&app, &h.user, "kdrive")
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        app.provider
+            .access_token(&app, &h.user, "notes")
+            .await
+            .err()
+            .unwrap()
+            .code,
+        "reconnection_required"
+    );
+    assert!(!oauth::available_scope(&app, &h.user, "notes:read").unwrap());
+    let start = request(
+        &app,
+        "POST",
+        "/api/connect/notes",
+        Value::Null,
+        &h.headers(),
+    )
+    .await;
+    assert_eq!(start.status, 400);
+}
+
+#[test]
+fn databases_newer_than_the_server_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("future.sqlite");
+    let store = Store::open(path.to_str().unwrap()).unwrap();
+    store
+        .with(|c| {
+            c.pragma_update(None, "user_version", ensemble_mcp::migrations::VERSION + 1)?;
+            Ok(())
+        })
+        .unwrap();
+    drop(store);
+    let mut connection = rusqlite::Connection::open(&path).unwrap();
+    assert!(ensemble_mcp::migrations::run(&mut connection, &cfg().encryption_key).is_err());
 }

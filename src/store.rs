@@ -31,7 +31,7 @@ impl Store {
         {
             std::fs::create_dir_all(parent).map_err(|_| Error::internal())?;
         }
-        let c = Connection::open(path)?;
+        let mut c = Connection::open(path)?;
         #[cfg(unix)]
         if path != ":memory:" {
             use std::os::unix::fs::PermissionsExt;
@@ -39,7 +39,19 @@ impl Store {
                 .map_err(|_| Error::internal())?;
         }
         c.busy_timeout(std::time::Duration::from_secs(3))?;
-        c.execute_batch(include_str!("schema.sql"))?;
+        c.execute_batch("PRAGMA journal_mode=WAL;PRAGMA foreign_keys=ON;PRAGMA secure_delete=ON;PRAGMA journal_size_limit=1048576;")?;
+        // Fresh databases start at the current version; others migrate in App::new.
+        let fresh: bool = c.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table')",
+            [],
+            |r| r.get(0),
+        )?;
+        if fresh {
+            let tx = c.transaction()?;
+            tx.execute_batch(include_str!("schema.sql"))?;
+            tx.pragma_update(None, "user_version", crate::migrations::VERSION)?;
+            tx.commit()?;
+        }
         Ok(Self {
             connection: Mutex::new(c),
         })
@@ -158,8 +170,8 @@ impl Store {
 
     pub fn user_summary(&self, user: &User) -> Result<Value> {
         self.with(|c| {
-            let mut stmt = c.prepare("SELECT module,scopes,expires,health,checked FROM credentials WHERE user_id=?")?;
-            let connections = stmt.query_map([user.id],|r| Ok(json!({"module":r.get::<_,String>(0)?,"scopes":r.get::<_,String>(1)?,"expires":r.get::<_,i64>(2)?,"health":r.get::<_,String>(3)?,"checked":r.get::<_,i64>(4)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let mut stmt = c.prepare("SELECT provider,scopes,expires,health,checked FROM connections WHERE user_id=?")?;
+            let connections = stmt.query_map([user.id],|r| Ok(json!({"provider":r.get::<_,String>(0)?,"scopes":r.get::<_,String>(1)?,"expires":r.get::<_,i64>(2)?,"health":r.get::<_,String>(3)?,"checked":r.get::<_,i64>(4)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
             let mut stmt=c.prepare("SELECT g.id,c.name,g.scopes FROM grants g JOIN clients c ON c.id=g.client_id WHERE g.user_id=? AND g.revoked=0")?;
             let grants=stmt.query_map([user.id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"scopes":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
             Ok(json!({"user":user,"connections":connections,"clients":grants}))

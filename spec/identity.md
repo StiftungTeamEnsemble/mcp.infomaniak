@@ -24,11 +24,11 @@
 
 - Decision 2026-10-21: Infomaniak OAuth applications only grant sign-in scopes (`openid profile email phone`); API scopes return `invalid_scope` ([developer docs](https://developer.infomaniak.com/getting-started) document API access through personal access tokens). Service access therefore uses one personal API token per employee.
 - Employees create the token in the [Infomaniak Manager](https://manager.infomaniak.com/v3/ng/accounts/token/list) and paste it once in the portal, which links there and shows the exact [form values](interface.md#users). They never create API applications.
-- Accept a token only when `GET /2/profile` succeeds and returns the signed-in user's email (and subject, when an ID is returned); never accept a colleague's token. Store it encrypted per user/service for each enabled, granted service. Provider 401s mark the connection for replacement; tokens have no server-side renewal.
-- Disconnect removes local credentials; the employee deletes the token in Infomaniak to invalidate it upstream.
+- Accept a token only when `GET /2/profile` succeeds and returns the signed-in user's email (and subject, when an ID is returned); never accept a colleague's token. Store one encrypted credential per user and provider; the `infomaniak` credential serves every enabled Infomaniak service the user is granted, including services granted later. Other providers' modules never receive it. Its scopes are chosen in the Manager and enforced upstream. Provider 401s mark the connection for replacement; tokens have no server-side renewal.
+- Disconnect removes the user's credential for all of that provider's services; the employee deletes the token in Infomaniak to invalidate it upstream.
 - Keep upstream credentials separate from MCP tokens and hidden from clients/tool results.
 - Signing in does not itself grant Mail, Calendar, kDrive or kChat API access.
-- The delegated OAuth connect flow remains implemented for providers that grant API scopes, but the portal does not offer it.
+- The delegated OAuth connect flow remains implemented for providers that grant API scopes, but the portal does not offer it. It requests every Infomaniak service's scopes and stores the same `infomaniak` credential; a service whose scopes were not granted requires reconnection.
 
 ## Before implementation
 

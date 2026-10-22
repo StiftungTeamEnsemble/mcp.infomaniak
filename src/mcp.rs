@@ -183,7 +183,7 @@ pub async fn handle(State(app): State<App>, headers: HeaderMap, body: Bytes) -> 
             )?;
             app.store.with(|db| {
                 db.execute(
-                    "UPDATE credentials SET health=?,checked=? WHERE user_id=? AND module=?",
+                    "UPDATE connections SET health=?,checked=? WHERE user_id=? AND provider=?",
                     params![
                         executed
                             .as_ref()
@@ -191,7 +191,7 @@ pub async fn handle(State(app): State<App>, headers: HeaderMap, body: Bytes) -> 
                             .unwrap_or_else(|e| e.code),
                         crate::store::now(),
                         actor.user.id,
-                        module.id
+                        module.provider
                     ],
                 )?;
                 Ok(())

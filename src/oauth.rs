@@ -232,21 +232,16 @@ pub fn available_scope(app: &App, user: &User, scope: &str) -> Result<bool> {
     if !app.store.module_enabled(module)? || app.store.local_level(user.id, module)? < level {
         return Ok(false);
     }
+    let module = app.modules.get(module)?;
     let scopes = app.store.with(|c| {
         Ok(c.query_row(
-            "SELECT scopes FROM credentials WHERE user_id=? AND module=?",
-            params![user.id, module],
+            "SELECT scopes FROM connections WHERE user_id=? AND provider=?",
+            params![user.id, module.provider],
             |r| r.get::<_, String>(0),
         )
         .optional()?)
     })?;
-    Ok(scopes.is_some_and(|s| {
-        app.modules.get(module).is_ok_and(|m| {
-            m.scopes
-                .iter()
-                .all(|v| s.split_whitespace().any(|s| s == *v))
-        })
-    }))
+    Ok(scopes.is_some_and(|s| crate::identity::covers(&s, &module.scopes)))
 }
 
 #[derive(Deserialize)]

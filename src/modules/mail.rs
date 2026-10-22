@@ -439,6 +439,7 @@ pub fn module() -> Module {
         id: "mail",
         name: "Mail",
         namespace: "mail",
+        provider: INFOMANIAK,
         scopes: vec!["workspace:mail", "user_info"],
         tools,
         routes: vec![],

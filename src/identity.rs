@@ -30,7 +30,7 @@ pub struct Metadata {
     pub code_challenge_methods_supported: Vec<String>,
 }
 
-type ConnectionLocks = Mutex<HashMap<(i64, String), Arc<Mutex<()>>>>;
+type ConnectionLocks = Mutex<HashMap<(i64, &'static str), Arc<Mutex<()>>>>;
 pub struct Provider {
     pub metadata: Metadata,
     pub http: Client,
@@ -268,16 +268,18 @@ impl Provider {
     }
 
     pub async fn access_token(&self, app: &App, user: &User, module: &str) -> Result<String> {
+        let module = app.modules.get(module)?;
+        let (provider, required) = (module.provider, &module.scopes);
         let lock = {
             let mut locks = self.locks.lock().await;
             locks.retain(|_, v| Arc::strong_count(v) > 1);
-            locks.entry((user.id, module.into())).or_default().clone()
+            locks.entry((user.id, provider)).or_default().clone()
         };
         let _guard = lock.lock().await;
         let (secret, scopes, expires) = app.store.with(|c| {
             c.query_row(
-                "SELECT secret,scopes,expires FROM credentials WHERE user_id=? AND module=?",
-                params![user.id, module],
+                "SELECT secret,scopes,expires FROM connections WHERE user_id=? AND provider=?",
+                params![user.id, provider],
                 |r| {
                     Ok((
                         r.get::<_, Vec<u8>>(0)?,
@@ -289,7 +291,10 @@ impl Provider {
             .optional()?
             .ok_or_else(Error::reconnect)
         })?;
-        let context = format!("credential:{}:{module}", user.id);
+        if !covers(&scopes, required) {
+            return Err(Error::reconnect());
+        }
+        let context = credential_context(user.id, provider);
         let mut credential: Credential = serde_json::from_slice(&crypto::open(
             &app.config.encryption_key,
             &context,
@@ -327,13 +332,7 @@ impl Provider {
             )?;
         }
         let renewed_scopes = response["scope"].as_str().unwrap_or(&scopes);
-        if !app
-            .modules
-            .get(module)?
-            .scopes
-            .iter()
-            .all(|s| renewed_scopes.split_whitespace().any(|v| v == *s))
-        {
+        if !covers(renewed_scopes, required) {
             return Err(Error::reconnect());
         }
         credential.access_token = response["access_token"]
@@ -358,8 +357,8 @@ impl Provider {
         // Do not resurrect a connection revoked while its refresh request was in flight.
         app.store.with(|c| {
             let changed = c.execute(
-                "UPDATE credentials SET secret=?,expires=?,scopes=? WHERE user_id=? AND module=? AND secret=?",
-                params![secret, expires, renewed_scopes, user.id, module,previous],
+                "UPDATE connections SET secret=?,expires=?,scopes=? WHERE user_id=? AND provider=? AND secret=?",
+                params![secret, expires, renewed_scopes, user.id, provider, previous],
             )?;
             if changed != 1 {
                 return Err(Error::reconnect());
@@ -411,6 +410,40 @@ pub struct Credential {
     pub access_token: String,
     pub refresh_token: Option<String>,
 }
+/// Scope marker for personal tokens: their scopes are chosen in the Infomaniak
+/// Manager and enforced upstream, so they serve every service.
+pub const PERSONAL_SCOPES: &str = "*";
+pub fn covers(scopes: &str, required: &[&str]) -> bool {
+    scopes == PERSONAL_SCOPES
+        || required
+            .iter()
+            .all(|r| scopes.split_whitespace().any(|s| s == *r))
+}
+pub fn credential_context(user: i64, provider: &str) -> String {
+    format!("credential:{user}:{provider}")
+}
+/// One credential per user and provider, shared by that provider's services.
+pub fn save_credential(
+    app: &App,
+    user: i64,
+    provider: &str,
+    credential: &Credential,
+    scopes: &str,
+    expires: i64,
+) -> Result<()> {
+    let secret = crypto::seal(
+        &app.config.encryption_key,
+        &credential_context(user, provider),
+        &serde_json::to_vec(credential)?,
+    )?;
+    app.store.with(|c| {
+        c.execute(
+            "INSERT INTO connections(user_id,provider,secret,scopes,expires) VALUES(?,?,?,?,?) ON CONFLICT(user_id,provider) DO UPDATE SET secret=excluded.secret,scopes=excluded.scopes,expires=excluded.expires,health='connected',checked=0",
+            params![user, provider, secret, scopes, expires],
+        )?;
+        Ok(())
+    })
+}
 #[derive(Serialize, Deserialize)]
 struct Login {
     verifier: String,
@@ -455,7 +488,23 @@ pub async fn start(
     let nonce = crypto::random();
     let mut scopes = vec!["openid", "profile", "email"];
     if let Some(module) = module.as_deref() {
-        scopes.extend(&app.modules.get(module)?.scopes);
+        // One Infomaniak credential serves every Infomaniak service, so request all their scopes.
+        if app.modules.get(module)?.provider != crate::modules::INFOMANIAK {
+            return Err(Error::invalid(
+                "This service does not use Infomaniak authorisation",
+            ));
+        }
+        for s in app
+            .modules
+            .modules
+            .iter()
+            .filter(|m| m.provider == crate::modules::INFOMANIAK)
+            .flat_map(|m| &m.scopes)
+        {
+            if !scopes.contains(s) {
+                scopes.push(s);
+            }
+        }
     }
     let mut url =
         Url::parse(&app.provider.metadata.authorization_endpoint).map_err(|_| Error::internal())?;
@@ -585,13 +634,7 @@ pub async fn callback(
             return Err(Error::denied());
         }
         let scopes = result["scope"].as_str().ok_or_else(Error::reconnect)?;
-        if !app
-            .modules
-            .get(&module)?
-            .scopes
-            .iter()
-            .all(|s| scopes.split_whitespace().any(|v| v == *s))
-        {
+        if !covers(scopes, &app.modules.get(&module)?.scopes) {
             return Err(Error::reconnect());
         }
         let credential = Credential {
@@ -607,12 +650,14 @@ pub async fn callback(
                 .as_i64()
                 .filter(|n| *n > 0 && *n <= 86400 * 30)
                 .ok_or_else(Error::reconnect)?;
-        let secret = crypto::seal(
-            &app.config.encryption_key,
-            &format!("credential:{}:{module}", user.id),
-            &serde_json::to_vec(&credential)?,
+        save_credential(
+            &app,
+            user.id,
+            crate::modules::INFOMANIAK,
+            &credential,
+            scopes,
+            expires,
         )?;
-        app.store.with(|c|{c.execute("INSERT INTO credentials(user_id,module,secret,scopes,expires) VALUES(?,?,?,?,?) ON CONFLICT(user_id,module) DO UPDATE SET secret=excluded.secret,scopes=excluded.scopes,expires=excluded.expires,health='connected',checked=0",params![user.id,module,secret,scopes,expires])?;Ok(())})?;
         app.store.audit(
             crate::web::request_id(&headers),
             Some(user.id),

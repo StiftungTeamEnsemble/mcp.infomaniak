@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-const account={user:{id:1,name:'Alice',email:'alice@team-ensemble.ch',status:'active',admin:false},csrf:'test-csrf',endpoint:'https://mcp.example.org/mcp',modules:[{id:'mail',name:'Mail',enabled:true,level:1,scopes:['workspace:mail','user_info']},{id:'calendar',name:'Calendar',enabled:false,level:0,scopes:['workspace:calendar','user_info']},{id:'kdrive',name:'kDrive',enabled:true,level:2,scopes:['drive','user_info']}],connections:[],clients:[]};
+const account={user:{id:1,name:'Alice',email:'alice@team-ensemble.ch',status:'active',admin:false},csrf:'test-csrf',endpoint:'https://mcp.example.org/mcp',modules:[{id:'mail',name:'Mail',provider:'infomaniak',enabled:true,level:1,scopes:['workspace:mail','user_info']},{id:'calendar',name:'Calendar',provider:'infomaniak',enabled:false,level:0,scopes:['workspace:calendar','user_info']},{id:'kdrive',name:'kDrive',provider:'infomaniak',enabled:true,level:2,scopes:['drive','user_info']}],connections:[],clients:[]};
 test('login uses browser sign-in and adapts to a phone',async({page})=>{
   await page.goto('/');await expect(page.getByRole('link',{name:'Sign in with Infomaniak'})).toHaveAttribute('href','/auth/login');
   await page.setViewportSize({width:375,height:812});await expect(page.getByRole('heading',{name:'A connection to your work.'})).toBeVisible();
@@ -29,7 +29,7 @@ test('personal token setup shows exact Infomaniak form values, sends csrf and ke
   await page.setViewportSize({width:375,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 test('saved tokens collapse the setup until the user reopens it',async({page})=>{
-  await page.route('**/api/me',r=>r.fulfill({json:{...account,connections:[{module:'mail',scopes:'workspace:mail user_info',expires:4102444800,health:'connected',checked:0}]}}));
+  await page.route('**/api/me',r=>r.fulfill({json:{...account,connections:[{provider:'infomaniak',scopes:'*',expires:4102444800,health:'connected',checked:0}]}}));
   await page.goto('/');
   await expect(page.getByRole('heading',{name:'Infomaniak API token saved'})).toBeVisible();await expect(page.getByLabel('Infomaniak API token')).toHaveCount(0);
   await page.getByRole('button',{name:'Show token setup'}).click();await expect(page.getByRole('heading',{name:'Replace your Infomaniak API token'})).toBeVisible();await expect(page.getByLabel('Infomaniak API token')).toBeVisible();

@@ -31,6 +31,7 @@ pub fn module() -> Module {
         id: "calendar",
         name: "Calendar",
         namespace: "calendar",
+        provider: INFOMANIAK,
         scopes: vec!["workspace:calendar", "user_info"],
         routes: vec![],
         resources: None,

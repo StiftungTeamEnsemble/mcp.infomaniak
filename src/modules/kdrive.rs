@@ -190,6 +190,7 @@ pub fn module() -> Module {
         id: "kdrive",
         name: "kDrive",
         namespace: "kdrive",
+        provider: INFOMANIAK,
         scopes: vec!["drive", "user_info"],
         tools,
         routes: vec![],
