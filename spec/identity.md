@@ -27,11 +27,11 @@
 - Accept a token only when `GET /2/profile` succeeds and returns the signed-in user's email (and subject, when an ID is returned); never accept a colleague's token. Store it encrypted per user/service for each enabled, granted service. Provider 401s mark the connection for replacement; tokens have no server-side renewal.
 - Disconnect removes local credentials; the employee deletes the token in Infomaniak to invalidate it upstream.
 - Keep upstream credentials separate from MCP tokens and hidden from clients/tool results.
-- Signing in does not itself grant Mail, Calendar or kDrive API access.
+- Signing in does not itself grant Mail, Calendar, kDrive or kChat API access.
 - The delegated OAuth connect flow remains implemented for providers that grant API scopes, but the portal does not offer it.
 
 ## Before implementation
 
 - Choose the public HTTPS origin. The organisation administrator creates an Infomaniak OAuth/OIDC application supporting server-side authorisation code; register `/auth/infomaniak/callback` under that origin and configure its [client credentials](environment.md).
-- Test two employees: validated identity claims, personal-token ownership, API isolation and token deletion. Verify personal tokens with scopes `workspace:mail`, `workspace:calendar`, `user_info`, `drive`.
+- Test two employees: validated identity claims, personal-token ownership, API isolation and token deletion. Verify personal tokens with scopes `workspace:mail`, `workspace:calendar`, `user_info`, `drive`, `kchat`.
 - Enable modules only after this access is verified.

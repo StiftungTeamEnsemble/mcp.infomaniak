@@ -1,6 +1,6 @@
 # Module system
 
-- Mail, Calendar, kDrive and future services implement the same registration contract within the shared Rust server.
+- Mail, Calendar, kDrive, kChat and future services implement the same registration contract within the shared Rust server.
 - Keep provider-specific behaviour inside each module. Adding or changing a module requires no edits to unrelated modules or shared authentication/admin infrastructure.
 
 ## Registration contract
@@ -27,4 +27,5 @@ Use these tool/provider-call references; authentication follows our [browser-bas
 
 - [Infomaniak Calendar MCP](https://github.com/Infomaniak/mcp-server-calendar)
 - [Infomaniak kDrive MCP](https://github.com/Infomaniak/mcp-server-kdrive)
+- [Infomaniak kChat MCP](https://github.com/Infomaniak/mcp-server-kchat)
 - [Infomaniak Mail MCP](https://github.com/Infomaniak/mcp-server-mail)

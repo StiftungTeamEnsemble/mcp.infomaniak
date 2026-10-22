@@ -1,4 +1,5 @@
 pub mod calendar;
+pub mod kchat;
 pub mod kdrive;
 pub mod mail;
 
@@ -75,7 +76,12 @@ pub struct Registry {
 }
 impl Registry {
     pub fn builtin() -> Result<Self> {
-        Self::new(vec![mail::module(), calendar::module(), kdrive::module()])
+        Self::new(vec![
+            mail::module(),
+            calendar::module(),
+            kdrive::module(),
+            kchat::module(),
+        ])
     }
     pub fn new(modules: Vec<Module>) -> Result<Self> {
         let (mut ids, mut namespaces, mut routes, mut tools) = (

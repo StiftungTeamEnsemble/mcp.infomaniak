@@ -19,3 +19,4 @@ Shared requirements apply to every service.
 - [Mail](modules/mail.md)
 - [Calendar](modules/calendar.md)
 - [kDrive](modules/kdrive.md)
+- [kChat](modules/kchat.md)

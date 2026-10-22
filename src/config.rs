@@ -12,6 +12,8 @@ pub struct Config {
     pub client_secret: String,
     pub allowed_domains: HashSet<String>,
     pub bind_addr: String,
+    /// Optional kChat team name; a lowercase DNS label forming the kChat host.
+    pub kchat_team: Option<String>,
 }
 
 impl Config {
@@ -67,6 +69,17 @@ impl Config {
         bind_addr
             .parse::<std::net::SocketAddr>()
             .map_err(|_| Error::config("BIND_ADDR"))?;
+        let kchat_team = get("KCHAT_TEAM")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| !v.is_empty());
+        if kchat_team.as_ref().is_some_and(|t| {
+            t.len() > 63
+                || t.starts_with('-')
+                || t.ends_with('-')
+                || !t.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        }) {
+            return Err(Error::config("KCHAT_TEAM"));
+        }
         Ok(Self {
             public_url: origin.origin().ascii_serialization(),
             sqlite_path: required("SQLITE_PATH")?,
@@ -75,6 +88,7 @@ impl Config {
             client_secret: required("INFOMANIAK_CLIENT_SECRET")?,
             allowed_domains,
             bind_addr,
+            kchat_team,
         })
     }
 

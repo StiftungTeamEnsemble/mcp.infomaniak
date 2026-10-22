@@ -36,6 +36,8 @@ pub struct Provider {
     pub http: Client,
     pub api: String,
     pub mail: String,
+    /// kChat origin template; `{team}` is replaced by the configured team. Overridden only by tests.
+    pub kchat: String,
     locks: ConnectionLocks,
 }
 
@@ -97,6 +99,7 @@ impl Provider {
             http,
             api,
             mail,
+            kchat: "https://{team}.kchat.infomaniak.com".into(),
             locks: Mutex::new(HashMap::new()),
         }
     }

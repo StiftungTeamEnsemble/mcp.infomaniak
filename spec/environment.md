@@ -10,9 +10,10 @@ INFOMANIAK_CLIENT_ID=<client-id>               # Organisation application for th
 INFOMANIAK_CLIENT_SECRET=<client-secret>       # Configure once on the server
 ALLOWED_EMAIL_DOMAINS=team-ensemble.ch          # Comma-separated login domains
 BIND_ADDR=127.0.0.1:3000                       # Optional internal listener; Compose uses 0.0.0.0:3000
+KCHAT_TEAM=team-name                           # Optional kChat team (subdomain of <team>.kchat.infomaniak.com)
 ```
 
-- Replace placeholders; reject missing/invalid values at startup.
+- Replace placeholders; reject missing/invalid values at startup. `KCHAT_TEAM` must be a single DNS label; it only selects the host under `kchat.infomaniak.com`.
 - Keep `.env` out of Git/frontend bundles; retain the encryption key across redeployments.
 - The native binary reads exported variables; `compose.yaml` interpolates the required variables from `.env` or the deployment platform (for example Coolify) and fails when one is missing. Generate the key with `cargo run -- generate-key`. `PUBLIC_URL` must be an HTTPS origin with no path, query, fragment or user information. TLS/proxy provisioning is external to the application; forwarded headers are ignored.
 - Compose uses `/data/mcp.sqlite` in its named volume regardless of the native example's `SQLITE_PATH` value. Restrict the data directory and backups to the application/operator; the database file is created with mode `0600` on Unix.

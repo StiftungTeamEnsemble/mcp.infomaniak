@@ -122,6 +122,38 @@ async fn upstream(State(state): State<MockState>, request: Request) -> Response 
         .unwrap();
         return Json(json!({"access_token":"delegated-a","refresh_token":"refresh-a","token_type":"Bearer","expires_in":3600,"scope":"openid profile email user_info drive workspace:mail workspace:calendar","id_token":token})).into_response();
     }
+    if let Some(kchat) = path.strip_prefix("/kchat/ensemble/api/v4") {
+        let post = |id: &str, root: &str, at: i64| json!({"id":id,"channel_id":"chan1","root_id":root,"user_id":"me1","message":format!("Message {id}"),"create_at":at});
+        let value = match (method.as_str(), kchat) {
+            ("GET", "/teams/name/ensemble") => json!({"id":"team1","name":"ensemble"}),
+            ("GET", "/teams/team1/channels") => {
+                json!([{"id":"chan1","team_id":"team1","type":"O","name":"town-square","display_name":"Town Square"}])
+            }
+            ("GET", "/users/me/teams/team1/channels") => {
+                json!([{"id":"chan1","team_id":"team1","type":"O","name":"town-square"},{"id":"dm1","team_id":"","type":"D","name":"bob1__me1"}])
+            }
+            ("GET", "/users/me") => json!({"id":"me1","username":"alice"}),
+            ("GET", "/users") => {
+                json!([{"id":"me1","username":"alice"},{"id":"bob1","username":"bob"}])
+            }
+            ("GET", "/users/bob1") | ("GET", "/users/username/bob") => {
+                json!({"id":"bob1","username":"bob"})
+            }
+            ("GET", "/channels/chan1/posts") => {
+                json!({"order":["post2","post1"],"posts":{"post1":post("post1","",1),"post2":post("post2","",2)}})
+            }
+            ("GET", "/posts/post1/thread") => {
+                json!({"order":["post3","post1"],"posts":{"post1":post("post1","",1),"post3":post("post3","post1",3)}})
+            }
+            ("POST", "/channels/direct") => json!({"id":"dm1","type":"D"}),
+            ("POST", "/posts") => {
+                json!({"id":"01a1624d-82b0-704f-960b-4456caa5f15e","channel_id":body["channel_id"],"root_id":body.get("root_id").cloned().unwrap_or(json!("")),"user_id":"me1","message":body["message"]})
+            }
+            ("POST", "/reactions") => body.clone(),
+            _ => return StatusCode::NOT_FOUND.into_response(),
+        };
+        return Json(value).into_response();
+    }
     if path.ends_with("/download") || path.contains("/attachment/") {
         let bytes = if mock.large {
             vec![0; ensemble_mcp::identity::MAX_BYTES + 1]
@@ -210,7 +242,7 @@ impl Harness {
             .with_state(mock.clone());
         let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let config = cfg();
-        let provider = Provider::with_endpoints(
+        let mut provider = Provider::with_endpoints(
             Metadata {
                 issuer: ISSUER.into(),
                 authorization_endpoint: format!("{base}/authorize"),
@@ -220,8 +252,9 @@ impl Harness {
             },
             Provider::http_client().unwrap(),
             base.clone(),
-            base,
+            base.clone(),
         );
+        provider.kchat = format!("{base}/kchat/{{team}}");
         let app = App::new(config, Store::open(":memory:").unwrap(), provider).unwrap();
         let user = app
             .store
@@ -244,7 +277,7 @@ impl Harness {
             c.execute("UPDATE modules SET enabled=1,verification='Mock verification'",[])?;
             c.execute("UPDATE policies SET level=2",[])?;Ok(())
         }).unwrap();
-        for module in ["mail", "calendar", "kdrive"] {
+        for module in ["mail", "calendar", "kdrive", "kchat"] {
             credential(&app, user.id, module, "delegated-a", now() + 3600);
         }
         Self {
@@ -277,7 +310,7 @@ impl Harness {
     }
     async fn deadline(&mut self, name: &str, args: Value, target: &str) -> Reply {
         // Keep the provider request pending beyond the overall MCP deadline.
-        self.app.provider = Arc::new(Provider::with_endpoints(
+        let mut provider = Provider::with_endpoints(
             self.app.provider.metadata.clone(),
             reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(200))
@@ -285,7 +318,9 @@ impl Harness {
                 .unwrap(),
             self.app.provider.api.clone(),
             self.app.provider.mail.clone(),
-        ));
+        );
+        provider.kchat = self.app.provider.kchat.clone();
+        self.app.provider = Arc::new(provider);
         let started = Arc::new(tokio::sync::Notify::new());
         self.mock.lock().unwrap().request_gate = Some((
             target.into(),
@@ -346,6 +381,7 @@ fn cfg() -> Config {
         client_secret: "provider-secret".into(),
         allowed_domains: ["team-ensemble.ch".into()].into_iter().collect(),
         bind_addr: "127.0.0.1:3000".into(),
+        kchat_team: Some("ensemble".into()),
     }
 }
 fn credential(app: &App, user: i64, module: &str, token: &str, expires: i64) {
@@ -525,7 +561,7 @@ fn module_registration_and_inputs_are_explicit() {
             .iter()
             .map(|m| m.tools.len())
             .sum::<usize>(),
-        40
+        50
     );
     let (_, tool) = registry.tool("kdrive_info").unwrap();
     assert!(tool.validate(&json!({"drive_id":9,"file_id":42})).is_ok());
@@ -674,7 +710,7 @@ async fn tools_filter_and_direct_calls_apply_live_policy() {
             .as_array()
             .unwrap()
             .len(),
-        40
+        50
     );
     h.sql("UPDATE modules SET enabled=0 WHERE module='mail'");
     let v = h.rpc("tools/list", json!({})).await.value;
@@ -756,7 +792,7 @@ async fn personal_tokens_must_belong_to_the_user_and_connect_only_granted_servic
     );
     let saved = save(" personal-a\n").await;
     assert_eq!(saved.status, 200);
-    assert_eq!(saved.value["connected"], json!(["mail", "kdrive"]));
+    assert_eq!(saved.value["connected"], json!(["mail", "kdrive", "kchat"]));
     let out = h
         .call("kdrive_info", json!({"drive_id":9,"file_id":42}))
         .await;
@@ -3982,7 +4018,7 @@ async fn provider_outages_never_retry_mutations_or_disable_other_modules() {
             .as_array()
             .unwrap()
             .len(),
-        40
+        50
     );
 }
 #[tokio::test]
@@ -4072,7 +4108,7 @@ async fn administrators_see_per_client_effective_access_without_credentials() {
     let scopes = out.value["clients"][0]["effective_scopes"]
         .as_array()
         .unwrap();
-    assert_eq!(scopes.len(), 4);
+    assert_eq!(scopes.len(), 6);
     assert!(
         !scopes
             .iter()
@@ -4344,7 +4380,7 @@ async fn registered_modules_supply_oauth_scopes_without_kernel_edits() {
     h.sql("INSERT INTO modules(module,enabled,verification) VALUES('notes',1,'mock'); INSERT INTO policies(kind,principal,module,level) VALUES('user',1,'notes',2)");
     credential(&app, h.user.id, "notes", "notes-token", now() + 3600);
     let scopes = oauth::scopes(&app);
-    assert_eq!(scopes.len(), 8);
+    assert_eq!(scopes.len(), 10);
     for path in [
         "/.well-known/oauth-authorization-server",
         "/.well-known/oauth-protected-resource",
@@ -4393,4 +4429,282 @@ async fn registered_modules_supply_oauth_scopes_without_kernel_edits() {
             .unwrap()
             .contains("code=")
     );
+}
+
+const KCHAT: &str = "/kchat/ensemble/api/v4";
+
+#[tokio::test]
+async fn kchat_reads_use_the_configured_team_and_validate_identities() {
+    let h = Harness::new().await;
+    let out = h.call("kchat_list_channels", json!({"limit":1})).await;
+    let result = &out["result"]["structuredContent"];
+    assert_eq!(result["data"][0]["id"], "chan1", "{out}");
+    assert_eq!(result["has_more"], true);
+    assert_eq!(result["context"]["next_page"], 1);
+    assert_eq!(
+        result["context"]["source_url"],
+        "https://ensemble.kchat.infomaniak.com/ensemble"
+    );
+    let call = h.mock.lock().unwrap().calls.last().unwrap().clone();
+    assert_eq!(
+        call.1,
+        format!("{KCHAT}/teams/team1/channels?page=0&per_page=1")
+    );
+    assert_eq!(call.2, "Bearer delegated-a");
+    let out = h.call("kchat_list_my_channels", json!({})).await;
+    assert_eq!(
+        out["result"]["structuredContent"]["data"][1]["type"], "D",
+        "{out}"
+    );
+    let out = h
+        .call("kchat_get_channel_history", json!({"channel_id":"chan1"}))
+        .await;
+    let result = &out["result"]["structuredContent"];
+    assert_eq!(result["data"][0]["id"], "post2", "{out}");
+    assert_eq!(
+        result["data"][0]["source_url"],
+        "https://ensemble.kchat.infomaniak.com/ensemble/pl/post2"
+    );
+    assert_eq!(result["has_more"], false);
+    assert!(result["context"]["next_page"].is_null());
+    let out = h
+        .call("kchat_get_thread_replies", json!({"thread_id":"post1"}))
+        .await;
+    let result = &out["result"]["structuredContent"];
+    assert_eq!(result["data"][0]["id"], "post1", "{out}");
+    assert_eq!(result["data"][1]["root_id"], "post1");
+    assert_eq!(result["context"]["channel_id"], "chan1");
+    let out = h.call("kchat_get_users", json!({})).await;
+    assert_eq!(
+        out["result"]["structuredContent"]["data"][1]["username"], "bob",
+        "{out}"
+    );
+    let out = h
+        .call("kchat_get_user_profile", json!({"user_id":"bob1"}))
+        .await;
+    assert_eq!(
+        out["result"]["structuredContent"]["data"]["id"], "bob1",
+        "{out}"
+    );
+    for (endpoint, tool, args, invalid) in [
+        (
+            "GET /users/bob1",
+            "kchat_get_user_profile",
+            json!({"user_id":"bob1"}),
+            json!({"id":"other1"}),
+        ),
+        (
+            "GET /teams/name/ensemble",
+            "kchat_list_channels",
+            json!({}),
+            json!({"id":"team1","name":"other"}),
+        ),
+        (
+            "GET /teams/team1/channels",
+            "kchat_list_channels",
+            json!({}),
+            json!([{"id":"chan9","team_id":"other"}]),
+        ),
+        (
+            "GET /channels/chan1/posts",
+            "kchat_get_channel_history",
+            json!({"channel_id":"chan1"}),
+            json!({"order":["post9"],"posts":{"post9":{"id":"post9","channel_id":"other"}}}),
+        ),
+        (
+            "GET /posts/post1/thread",
+            "kchat_get_thread_replies",
+            json!({"thread_id":"post1"}),
+            json!({"order":["post9"],"posts":{"post9":{"id":"post9","channel_id":"chan1","root_id":"other"}}}),
+        ),
+        (
+            "GET /posts/post1/thread",
+            "kchat_get_thread_replies",
+            json!({"thread_id":"post1"}),
+            json!({"order":[],"posts":{},"has_next":true}),
+        ),
+    ] {
+        let (method, path) = endpoint.split_once(' ').unwrap();
+        h.mock
+            .lock()
+            .unwrap()
+            .responses
+            .insert(format!("{method} {KCHAT}{path}"), invalid);
+        let out = h.call(tool, args).await;
+        assert!(
+            ["provider_error", "provider_limitation"]
+                .contains(&out["result"]["_meta"]["error_code"].as_str().unwrap_or("")),
+            "{out}"
+        );
+        h.mock.lock().unwrap().responses.clear();
+    }
+    for args in [json!({"user_id":"a_b"}), json!({"user_id":"../x"})] {
+        let out = h.call("kchat_get_user_profile", args).await;
+        assert!(
+            out["error"].is_object() || out["result"]["_meta"]["error_code"] == "invalid_request",
+            "{out}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn kchat_writes_record_recovery_context_and_validate_results() {
+    let h = Harness::new().await;
+    let out = h
+        .call(
+            "kchat_post_message",
+            json!({"channel_id":"chan1","text":"Hello"}),
+        )
+        .await;
+    let post = &out["result"]["structuredContent"]["data"];
+    assert_eq!(post["id"], "01a1624d-82b0-704f-960b-4456caa5f15e", "{out}");
+    assert_eq!(
+        post["source_url"],
+        "https://ensemble.kchat.infomaniak.com/ensemble/pl/01a1624d-82b0-704f-960b-4456caa5f15e"
+    );
+    let body = h.mock.lock().unwrap().calls.last().unwrap().3.clone();
+    assert_eq!(body, json!({"channel_id":"chan1","message":"Hello"}));
+    let out = h
+        .call(
+            "kchat_reply_to_thread",
+            json!({"channel_id":"chan1","thread_id":"post1","text":"Reply"}),
+        )
+        .await;
+    assert_eq!(
+        out["result"]["structuredContent"]["data"]["root_id"], "post1",
+        "{out}"
+    );
+    let out = h
+        .call(
+            "kchat_add_reaction",
+            json!({"post_id":"post1","reaction":":thumbsup:"}),
+        )
+        .await;
+    assert_eq!(
+        out["result"]["structuredContent"]["data"]["emoji_name"], "thumbsup",
+        "{out}"
+    );
+    let body = h.mock.lock().unwrap().calls.last().unwrap().3.clone();
+    assert_eq!(
+        body,
+        json!({"user_id":"me1","post_id":"post1","emoji_name":"thumbsup"})
+    );
+    let out = h
+        .call(
+            "kchat_send_direct_message",
+            json!({"username":"@Bob","text":"Hi"}),
+        )
+        .await;
+    assert_eq!(
+        out["result"]["structuredContent"]["data"]["channel_id"], "dm1",
+        "{out}"
+    );
+    let calls = h.mock.lock().unwrap().calls.clone();
+    let direct = calls
+        .iter()
+        .find(|c| c.1.starts_with(&format!("{KCHAT}/channels/direct")))
+        .unwrap();
+    assert_eq!(direct.3, json!(["me1", "bob1"]));
+
+    h.mock.lock().unwrap().responses.insert(
+        format!("POST {KCHAT}/posts"),
+        json!({"id":"new9","channel_id":"other"}),
+    );
+    let out = h
+        .call(
+            "kchat_post_message",
+            json!({"channel_id":"chan1","text":"Hello"}),
+        )
+        .await;
+    assert_eq!(
+        out["result"]["_meta"]["error_code"], "mutation_uncertain",
+        "{out}"
+    );
+    let context = &out["result"]["_meta"]["error_context"];
+    assert_eq!(context["channel_id"], "chan1");
+    assert_eq!(context["phase"], "post_message");
+    assert_eq!(context["returned_post_id"], "new9");
+
+    let out = h
+        .call(
+            "kchat_send_direct_message",
+            json!({"username":"bob","text":"Hi"}),
+        )
+        .await;
+    let context = &out["result"]["_meta"]["error_context"];
+    assert_eq!(context["phase"], "post_message", "{out}");
+    assert_eq!(context["channel_id"], "dm1");
+    assert_eq!(context["completed"], json!(["open_direct_channel"]));
+
+    h.mock.lock().unwrap().responses.insert(
+        format!("POST {KCHAT}/channels/direct"),
+        json!({"id":"chan1","type":"O"}),
+    );
+    let posts = |h: &Harness| {
+        h.mock
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .filter(|c| c.0 == "POST" && c.1.starts_with(&format!("{KCHAT}/posts")))
+            .count()
+    };
+    let before = posts(&h);
+    let out = h
+        .call(
+            "kchat_send_direct_message",
+            json!({"username":"bob","text":"Hi"}),
+        )
+        .await;
+    assert_eq!(
+        out["result"]["_meta"]["error_code"], "mutation_uncertain",
+        "{out}"
+    );
+    assert_eq!(
+        out["result"]["_meta"]["error_context"]["phase"],
+        "open_direct_channel"
+    );
+    assert_eq!(posts(&h), before);
+}
+
+#[tokio::test]
+async fn kchat_without_a_configured_team_exposes_no_data() {
+    let mut h = Harness::new().await;
+    let mut config = cfg();
+    config.kchat_team = None;
+    h.app.config = Arc::new(config);
+    let out = h.call("kchat_list_channels", json!({})).await;
+    assert_eq!(
+        out["result"]["_meta"]["error_code"], "module_unconfigured",
+        "{out}"
+    );
+    assert!(
+        !h.mock
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .any(|c| c.1.starts_with("/kchat/"))
+    );
+    let load = |team: &'static str| {
+        Config::load(move |k| {
+            match k {
+                "KCHAT_TEAM" => Some(team),
+                "PUBLIC_URL" => Some("https://mcp.example.org"),
+                "CREDENTIAL_ENCRYPTION_KEY" => Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+                "ALLOWED_EMAIL_DOMAINS" => Some("team-ensemble.ch"),
+                "BIND_ADDR" => None,
+                _ => Some("value"),
+            }
+            .map(String::from)
+        })
+    };
+    assert_eq!(
+        load(" Ensemble ").ok().unwrap().kchat_team.as_deref(),
+        Some("ensemble")
+    );
+    assert!(load("").ok().unwrap().kchat_team.is_none());
+    for team in ["evil.example.org/", "a.b", "-team", "team@x"] {
+        assert!(load(team).is_err(), "{team}");
+    }
 }
