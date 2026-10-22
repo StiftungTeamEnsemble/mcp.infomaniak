@@ -4708,3 +4708,56 @@ async fn kchat_without_a_configured_team_exposes_no_data() {
         assert!(load(team).is_err(), "{team}");
     }
 }
+
+#[tokio::test]
+async fn calendar_updates_send_only_writable_fields() {
+    let h = Harness::new().await;
+    // Read-back events carry read-only metadata and offset timestamps.
+    h.mock.lock().unwrap().responses.insert(
+        "GET /1/calendar/pim/event/7".into(),
+        json!({"data":{"id":7,"title":"Existing","calendar_id":"actual-calendar","start":"2026-10-17T10:00:00+02:00","end":"2026-10-17T09:00:00Z","timezone_start":"Europe/Zurich","timezone_end":"Europe/Zurich","description":null,"rrule":"","user_id":5,"created_at":1,"updated_at":2,"permissions":{"write":true},"categories":[],"attendees":[{"address":"person@example.org"}],"bookable_resource_id":"room-1"}}),
+    );
+    let out = h
+        .call(
+            "calendar_update_event",
+            json!({"event_id":"7","start":"2026-10-17T10:30:00+02:00"}),
+        )
+        .await;
+    assert_eq!(out["result"]["isError"], false, "{out}");
+    let mock = h.mock.lock().unwrap();
+    let body = &mock.calls.iter().find(|c| c.0 == "PUT").unwrap().3;
+    let writable = [
+        "id",
+        "calendar_id",
+        "title",
+        "description",
+        "start",
+        "end",
+        "timezone_start",
+        "timezone_end",
+        "freebusy",
+        "type",
+        "fullday",
+        "private",
+        "location",
+        "color",
+        "attendees",
+        "alarms",
+        "attachments",
+        "rrule",
+        "meet_room_url",
+        "bookable_resource_id",
+        "notifyAttendees",
+        "parent_updated",
+        "imip_request",
+    ];
+    for key in body.as_object().unwrap().keys() {
+        assert!(writable.contains(&key.as_str()), "{key}: {body}");
+    }
+    assert_eq!(body["id"], 7);
+    assert_eq!(body["start"], "2026-10-17 10:30:00");
+    assert_eq!(body["end"], "2026-10-17 11:00:00");
+    assert_eq!(body["description"], "");
+    assert_eq!(body["attendees"][0]["address"], "person@example.org");
+    assert_eq!(body["bookable_resource_id"], "room-1");
+}

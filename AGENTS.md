@@ -12,7 +12,7 @@
 - Apply [newly validated identity claims](spec/environment.md#domain-restriction) to existing access checks, including after credential renewal.
 - Validate provider-returned identifiers before constructing paths and reused mail header/attachment metadata before uploads; preserve authorisation failures from sending-identity lookup. Check [Mail listing/message/draft identities](spec/modules/mail.md#behaviour) against the returned/requested objects and mailbox; never infer global-search folders from the query base. Retain safe returned draft IDs for uncertain mutations.
 - Check [kDrive result identities](spec/modules/kdrive.md#behaviour) against the requested file/drive before downloads or discovery caching; validate file-mutation acknowledgements even when IDs are omitted and retain safe returned IDs for recovery.
-- Validate [Calendar result identities](spec/modules/calendar.md#behaviour), including deletion acknowledgements, and reject incomplete lists; preserve known event IDs when a mutation result is uncertain.
+- Calendar updates send only the reference's writable fields. Validate [Calendar result identities](spec/modules/calendar.md#behaviour), including deletion acknowledgements, and reject incomplete lists; preserve known event IDs when a mutation result is uncertain.
 - [kChat](spec/modules/kchat.md) requires `KCHAT_TEAM`; validate returned team/channel/thread/post/user identities and record phase before each write, including the direct-channel step.
 - Production host (Coolify): `ssh -p 22 -i ${HOME}/.ssh/id_ed25519 root@91.98.192.176`; SQLite is in `/DATA/mcp/infomaniak`. Never print, copy off-host or log stored credentials.
 - Keep this file concise: agent instructions and links. Document project facts once in `/spec`.

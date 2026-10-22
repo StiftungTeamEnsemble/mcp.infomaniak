@@ -288,6 +288,52 @@ fn event_metadata(
     Ok(event)
 }
 
+/// The reference client's writable update fields. The provider rejects the
+/// read-only metadata of a read-back event (HTTP 422 `validation_failed`).
+fn writable_event(event: &Value, tz_start: &str, tz_end: &str) -> Value {
+    let or = |field: &str, default: Value| match &event[field] {
+        Value::Null => default,
+        value => value.clone(),
+    };
+    // Read-back times may carry an offset; send event-timezone wall time.
+    let time = |field: &str, tz: &str| match (event[field].as_str(), tz.parse::<Tz>()) {
+        (Some(raw), Ok(tz)) => DateTime::parse_from_rfc3339(raw)
+            .map(|t| json!(t.with_timezone(&tz).format("%Y-%m-%d %H:%M:%S").to_string()))
+            .unwrap_or_else(|_| json!(raw)),
+        _ => event[field].clone(),
+    };
+    let mut out = json!({
+        "id": event["id"],
+        "calendar_id": event["calendar_id"],
+        "title": event["title"],
+        "description": or("description", json!("")),
+        "start": time("start", tz_start),
+        "end": time("end", tz_end),
+        "timezone_start": tz_start,
+        "timezone_end": tz_end,
+        "freebusy": or("freebusy", json!("busy")),
+        "type": or("type", json!("event")),
+        "fullday": or("fullday", json!(false)),
+        "private": or("private", json!(false)),
+        "color": event["color"],
+        "attendees": or("attendees", json!([])),
+        "alarms": or("alarms", json!([])),
+        "attachments": or("attachments", json!([])),
+        "rrule": or("rrule", json!("")),
+        "meet_room_url": or("meet_room_url", json!("")),
+        "notifyAttendees": event["notifyAttendees"],
+        "parent_updated": false,
+        "imip_request": false,
+    });
+    if event["location"].as_str().is_some_and(|l| !l.is_empty()) {
+        out["location"] = event["location"].clone();
+    }
+    if let Some(room) = event.get("bookable_resource_id") {
+        out["bookable_resource_id"] = room.clone();
+    }
+    out
+}
+
 pub async fn call(c: Call, name: String) -> Result<Value> {
     let args = &c.args;
     let base = format!("{}/1/calendar/pim", c.app.provider.api);
@@ -543,7 +589,11 @@ pub async fn call(c: Call, name: String) -> Result<Value> {
             if create { Method::POST } else { Method::PUT },
             url,
             &[],
-            Some(existing),
+            Some(if create {
+                existing
+            } else {
+                writable_event(&existing, &tz_start, &tz_end)
+            }),
         )
         .await?;
     let event = event_metadata(

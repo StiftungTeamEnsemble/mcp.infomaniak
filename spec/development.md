@@ -23,6 +23,7 @@
 
 ## Verification status
 
+- 2026-10-22 07:11 UTC live: three `calendar_update_event` calls failed with provider `422 validation_failed` because updates resent the whole read-back event. Updates now send the reference's writable fields and convert unchanged offset times to the event timezone; the regression test reproduced the defect before the fix. All 102 Rust integration tests and strict Clippy passed; the live update needs reconfirmation after deployment.
 - 2026-10-22 kChat module (mock-tested only): all 101 Rust integration tests, seven Chrome UI tests, UI build, documentation links, strict Clippy and formatting passed. Production team: `KCHAT_TEAM=stefan-huber` (confirmed by a live permalink `https://stefan-huber.kchat.infomaniak.com/stefan-huber/pl/<uuid>` and the kSuite URL `https://ksuite.infomaniak.com/1480441/kchat/stefan-huber/channels/…`). The stored personal token got 404 from `ensemble.kchat.infomaniak.com`, which is not the organisation's team. Live checks outstanding: personal-token access to `{team}.kchat.infomaniak.com/api/v4`, provider pagination (`has_next`), reaction `user_id` requirement, direct-channel shape and Mattermost error codes (currently only status/endpoint are recorded).
 - 2026-10-21 client grant editing: all 98 Rust integration tests, seven Chrome UI tests and strict Clippy passed.
 - 2026-10-21 personal-token change: all 97 Rust integration tests, five Chrome UI tests, strict Clippy and formatting passed.
