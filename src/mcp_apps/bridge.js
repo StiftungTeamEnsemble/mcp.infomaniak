@@ -70,7 +70,11 @@ const ui = (() => {
     }
     try {
       if (message.method === 'ui/notifications/tool-input') input = message.params?.arguments || {};
-      if (message.method === 'ui/notifications/tool-result') render(result(message.params), input);
+      if (message.method === 'ui/notifications/tool-result') {
+        render(result(message.params), input);
+        // Off-screen frames may throttle ResizeObserver; report the rendered size directly.
+        notify('ui/notifications/size-changed', {height: Math.ceil(document.body.getBoundingClientRect().height)});
+      }
       if (message.method === 'ui/notifications/tool-cancelled') error(new Error('The operation was cancelled.'));
       if (message.method === 'ui/notifications/host-context-changed') context(message.params);
     } catch (reason) { error(reason); }
