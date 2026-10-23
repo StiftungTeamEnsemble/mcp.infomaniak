@@ -207,7 +207,7 @@ async fn upstream(State(state): State<MockState>, request: Request) -> Response 
     } else if path.ends_with("/draft/attachment") {
         json!({"uuid":"attachment-a"})
     } else if path == "/3/drive/9/upload" {
-        json!({"id":43,"name":"uploaded.txt","type":"file","mime_type":"text/plain"})
+        json!({"id":43,"name":"uploaded.txt","type":"file","mime_type":"text/plain","parent_id":1,"extension_type":"text"})
     } else if path.ends_with("/directory") && method == "POST" {
         json!({"id":44,"name":body["name"],"type":"dir"})
     } else if path.ends_with("/files") && method == "GET" {
@@ -2804,7 +2804,7 @@ async fn upload_validates_exclusive_content_and_handles_empty_text() {
     assert_eq!(result(&out)["data"]["drive_id"], 9);
     assert_eq!(
         result(&out)["data"]["source_url"],
-        "https://kdrive.infomaniak.com/app/drive/9/files/43"
+        "https://ksuite.infomaniak.com/all/kdrive/app/drive/9/files/1/preview/text/43"
     );
 }
 #[tokio::test]

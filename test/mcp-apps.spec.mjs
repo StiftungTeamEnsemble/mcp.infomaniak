@@ -61,7 +61,7 @@ test('email preserves safe formatting and blocks active content and tracking req
 
 test('kDrive expands and pages each folder using its own drive, folder and cursor', async ({page}) => {
   const folder = (data, file, more = false, cursor = null) => ({structuredContent: {data, context: {drive_id: 9, file_id: file}, has_more: more, cursor}});
-  const item = (id, name) => ({id, name, type: 'file', source_url: `https://kdrive.infomaniak.com/app/drive/9/files/${id}`});
+  const item = (id, name) => ({id, name, type: 'file', source_url: `https://ksuite.infomaniak.com/all/kdrive/app/drive/9/files/2/preview/pdf/${id}`});
   const frame = await app(page, 'kdrive', {data: [{id: 2, name: 'Design', type: 'dir'}, {...item(42, 'Brief.txt'), size: 1536}], context: {drive_id: 9, file_id: 1, folder_name: 'Projects'}, has_more: true, cursor: 'root-next'}, {}, [
     folder([item(43, 'Sketch.pdf')], 2, true, 'child-next'),
     folder([item(44, 'Final.pdf')], 2),

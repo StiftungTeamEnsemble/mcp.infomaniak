@@ -295,7 +295,7 @@ async fn list_drives(c: &Call) -> Result<Value> {
                 .as_i64()
                 .filter(|id| (1..=9007199254740991).contains(id))
                 .ok_or_else(invalid)?;
-            Ok(json!({"id":id,"name":d["name"],"account_id":d["account_id"],"role":d["role"],"in_maintenance":d["in_maintenance"],"source_url":format!("https://kdrive.infomaniak.com/app/drive/{id}/files/1")}))
+            Ok(json!({"id":id,"name":d["name"],"account_id":d["account_id"],"role":d["role"],"in_maintenance":d["in_maintenance"],"source_url":format!("{WEB}/{id}/files/1")}))
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(result(json!(drives), json!({})))
@@ -533,9 +533,13 @@ async fn operate(c: Call, name: String) -> Result<Value> {
     if listing || matches!(op, "info" | "create_folder") {
         remember_files(&c.app, c.actor.user.id, drive, &items)?;
     }
+    // A single item links to itself; listings link to the requested folder.
+    let source = items["source_url"]
+        .as_str()
+        .map_or_else(|| format!("{WEB}/{drive}/files/{file}"), String::from);
     let mut out = result(
         items,
-        json!({"drive_id":drive,"file_id":file,"source_url":format!("https://kdrive.infomaniak.com/app/drive/{drive}/files/{file}")}),
+        json!({"drive_id":drive,"file_id":file,"source_url":source}),
     );
     out["has_more"] = json!(has_more);
     out["cursor"] = cursor;
@@ -610,11 +614,36 @@ fn file_metadata(
     }
     item["id"] = json!(id);
     item["drive_id"] = json!(drive);
-    item["source_url"] = json!(format!(
-        "https://kdrive.infomaniak.com/app/drive/{drive}/files/{}",
-        id.unwrap()
-    ));
+    item["source_url"] = json!(web_url(drive, id.unwrap(), &item));
     Ok(item)
+}
+
+/// kDrive web app; `all` stands in for the kSuite account, as in Infomaniak's
+/// own deep links. The API returns no web URL.
+const WEB: &str = "https://ksuite.infomaniak.com/all/kdrive/app/drive";
+
+/// Files open in their parent folder's preview, typed by the API's
+/// `extension_type`, the link shape Infomaniak's apps parse:
+/// https://github.com/Infomaniak/ios-kDrive/blob/main/kDriveCore/Utils/Deeplinks/FilePreviewLink.swift
+fn web_url(drive: i64, id: i64, item: &Value) -> String {
+    if item["type"] == "dir" {
+        return format!("{WEB}/{drive}/files/{id}");
+    }
+    let parent = item["parent_id"]
+        .as_i64()
+        .filter(|id| (1..=9007199254740991).contains(id));
+    let kind = item["extension_type"]
+        .as_str()
+        .filter(|kind| {
+            (1..=32).contains(&kind.len()) && kind.bytes().all(|b| b.is_ascii_lowercase())
+        })
+        // The type list calls email `mail`; web links use `email`.
+        .map(|kind| if kind == "mail" { "email" } else { kind });
+    match (parent, kind) {
+        (Some(parent), Some(kind)) => format!("{WEB}/{drive}/files/{parent}/preview/{kind}/{id}"),
+        (Some(parent), None) => format!("{WEB}/{drive}/files/{parent}"),
+        _ => format!("{WEB}/{drive}/files/1"),
+    }
 }
 
 use crate::{App, oauth};

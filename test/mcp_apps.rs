@@ -437,7 +437,7 @@ async fn kdrive_lists_accessible_drives_and_separates_wrong_drives_from_revoked_
     assert_eq!(drives["result"]["isError"], false, "{drives}");
     assert_eq!(
         result(&drives)["data"],
-        json!([{"id":9,"name":"Team Ensemble","account_id":1480441,"role":"user","in_maintenance":false,"source_url":"https://kdrive.infomaniak.com/app/drive/9/files/1"}])
+        json!([{"id":9,"name":"Team Ensemble","account_id":1480441,"role":"user","in_maintenance":false,"source_url":"https://ksuite.infomaniak.com/all/kdrive/app/drive/9/files/1"}])
     );
     h.mock.lock().unwrap().response_statuses.insert(
         "GET /3/drive/77/files/1/files".into(),
@@ -481,5 +481,48 @@ async fn kdrive_lists_accessible_drives_and_separates_wrong_drives_from_revoked_
             out["result"]["_meta"]["error_code"], "provider_error",
             "{out}"
         );
+    }
+}
+
+#[tokio::test]
+async fn kdrive_links_open_files_in_their_typed_preview() {
+    let h = Harness::new().await;
+    let web = "https://ksuite.infomaniak.com/all/kdrive/app/drive/9/files";
+    for (item, link) in [
+        (
+            json!({"id":42,"type":"file","parent_id":15754,"extension_type":"pdf"}),
+            format!("{web}/15754/preview/pdf/42"),
+        ),
+        (
+            json!({"id":42,"type":"file","parent_id":15754,"extension_type":"mail"}),
+            format!("{web}/15754/preview/email/42"),
+        ),
+        (
+            json!({"id":42,"type":"dir","parent_id":15754}),
+            format!("{web}/42"),
+        ),
+        (
+            json!({"id":42,"type":"file","parent_id":15754}),
+            format!("{web}/15754"),
+        ),
+        (
+            json!({"id":42,"type":"file","parent_id":15754,"extension_type":"../x"}),
+            format!("{web}/15754"),
+        ),
+        (
+            json!({"id":42,"type":"file","extension_type":"pdf"}),
+            format!("{web}/1"),
+        ),
+    ] {
+        h.mock
+            .lock()
+            .unwrap()
+            .responses
+            .insert("GET /3/drive/9/files/42".into(), json!({"data":item}));
+        let out = h
+            .call("kdrive_info", json!({"drive_id":9,"file_id":42}))
+            .await;
+        assert_eq!(result(&out)["data"]["source_url"], link.as_str(), "{out}");
+        assert_eq!(result(&out)["context"]["source_url"], link.as_str());
     }
 }
