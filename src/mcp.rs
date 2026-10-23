@@ -182,7 +182,8 @@ pub async fn handle(State(app): State<App>, headers: HeaderMap, body: Bytes) -> 
             )?;
             app.store.with(|db| {
                 db.execute(
-                    "UPDATE connections SET health=?,checked=? WHERE user_id=? AND provider=?",
+                    // Health describes the shared credential, not one service's last outcome.
+                    "UPDATE connections SET health=?,checked=? WHERE user_id=? AND provider=? AND ?",
                     params![
                         executed
                             .as_ref()
@@ -190,7 +191,10 @@ pub async fn handle(State(app): State<App>, headers: HeaderMap, body: Bytes) -> 
                             .unwrap_or_else(|e| e.code),
                         crate::store::now(),
                         actor.user.id,
-                        module.provider
+                        module.provider,
+                        executed
+                            .as_ref()
+                            .map_or_else(|e| e.code == "reconnection_required", |_| true)
                     ],
                 )?;
                 Ok(())

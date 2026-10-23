@@ -180,7 +180,7 @@ pub fn module() -> Module {
         ) {
             t.schema["properties"]["cursor"] = json!({"type":"string","minLength":1,"maxLength":2048,"description":"Continuation cursor from the previous page; retain the same drive and filters"});
         }
-        t.schema["properties"]["drive_id"] = n();
+        t.schema["properties"]["drive_id"] = json!({"type":"integer","minimum":1,"maximum":9007199254740991_i64,"description":"Numeric drive ID from kdrive_list_drives"});
         t.schema["required"]
             .as_array_mut()
             .unwrap()
@@ -199,6 +199,17 @@ pub fn module() -> Module {
         script: include_str!("kdrive/app.js"),
     });
     tools.push(show);
+    let mut drives = tool(
+        "kdrive_list_drives",
+        "List the kDrive drives your Infomaniak token can access, with the IDs every other kDrive tool requires.",
+        false,
+        false,
+        true,
+        &[],
+        vec![],
+    );
+    drives.output = json!({"type":"array","items":{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":["string","null"]},"account_id":{"type":["integer","null"]},"role":{"type":["string","null"]},"in_maintenance":{"type":["boolean","null"]},"source_url":{"type":"string"}},"required":["id","source_url"]}});
+    tools.insert(0, drives);
     Module {
         id: "kdrive",
         name: "kDrive",
@@ -215,6 +226,82 @@ pub fn module() -> Module {
     }
 }
 pub async fn call(c: Call, name: String) -> Result<Value> {
+    if name == "kdrive_list_drives" {
+        return list_drives(&c).await;
+    }
+    let (app, token) = (c.app.clone(), c.token.clone());
+    match operate(c, name).await {
+        // Infomaniak answers 401 for drives the token cannot access. Only a
+        // token the profile endpoint also rejects requires reconnection.
+        Err(e) if e.code == "reconnection_required" => {
+            let profile = format!("{}/2/profile", app.provider.api);
+            match app
+                .provider
+                .request(&token, Method::GET, profile, &[], None)
+                .await
+            {
+                Ok(_) => {
+                    let mut error = Error::new(
+                        404,
+                        "drive_not_accessible",
+                        "This drive is not accessible with your Infomaniak token; use a drive ID from kdrive_list_drives",
+                    );
+                    error.context = e.context;
+                    Err(error)
+                }
+                Err(_) => Err(e),
+            }
+        }
+        other => other,
+    }
+}
+
+/// Drives come from the endpoint Infomaniak's kDrive apps use:
+/// https://github.com/Infomaniak/android-kDrive/blob/main/app/src/main/java/com/infomaniak/drive/data/api/ApiRoutes.kt
+async fn list_drives(c: &Call) -> Result<Value> {
+    let response = c
+        .app
+        .provider
+        .request(
+            &c.token,
+            Method::GET,
+            format!("{}/2/drive/init", c.app.provider.api),
+            &[("with".into(), "drives".into())],
+            None,
+        )
+        .await?;
+    let invalid = || {
+        Error::new(
+            502,
+            "provider_error",
+            "Provider returned an invalid drive list",
+        )
+    };
+    let drives = data(response)["drives"]
+        .as_array()
+        .cloned()
+        .ok_or_else(invalid)?;
+    if drives.len() > 500 {
+        return Err(Error::new(
+            502,
+            "provider_limitation",
+            "Provider returned too many drives",
+        ));
+    }
+    let drives = drives
+        .into_iter()
+        .map(|d| {
+            let id = d["id"]
+                .as_i64()
+                .filter(|id| (1..=9007199254740991).contains(id))
+                .ok_or_else(invalid)?;
+            Ok(json!({"id":id,"name":d["name"],"account_id":d["account_id"],"role":d["role"],"in_maintenance":d["in_maintenance"],"source_url":format!("https://kdrive.infomaniak.com/app/drive/{id}/files/1")}))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(result(json!(drives), json!({})))
+}
+
+async fn operate(c: Call, name: String) -> Result<Value> {
     let args = &c.args;
     let drive = numeric(args, "drive_id", 0);
     let file = numeric(args, "file_id", 1);

@@ -577,7 +577,7 @@ fn module_registration_and_inputs_are_explicit() {
             .iter()
             .map(|m| m.tools.len())
             .sum::<usize>(),
-        54
+        55
     );
     let (_, tool) = registry.tool("kdrive_info").unwrap();
     assert!(tool.validate(&json!({"drive_id":9,"file_id":42})).is_ok());
@@ -726,7 +726,7 @@ async fn tools_filter_and_direct_calls_apply_live_policy() {
             .as_array()
             .unwrap()
             .len(),
-        54
+        55
     );
     h.sql("UPDATE modules SET enabled=0 WHERE module='mail'");
     let v = h.rpc("tools/list", json!({})).await.value;
@@ -926,11 +926,14 @@ async fn upstream_reconnection_failures_keep_http_status_for_tools_and_resources
             if target == "POST /token" {
                 credential(&h.app, h.user.id, "expired", now() - 1);
             }
-            h.mock
-                .lock()
-                .unwrap()
-                .response_statuses
-                .insert(target.into(), StatusCode::UNAUTHORIZED);
+            {
+                let mut mock = h.mock.lock().unwrap();
+                mock.response_statuses
+                    .insert(target.into(), StatusCode::UNAUTHORIZED);
+                // A revoked token fails everywhere, including the profile check.
+                mock.response_statuses
+                    .insert("GET /2/profile".into(), StatusCode::UNAUTHORIZED);
+            }
             let params = match method {
                 "tools/call" => {
                     json!({"name":"kdrive_info","arguments":{"drive_id":9,"file_id":42}})
@@ -4032,13 +4035,14 @@ async fn provider_outages_never_retry_mutations_or_disable_other_modules() {
             )
         })
         .unwrap();
-    assert_eq!(health, "mutation_uncertain");
+    // A service outage never marks the shared credential as unhealthy.
+    assert_eq!(health, "connected");
     assert_eq!(
         h.rpc("tools/list", json!({})).await.value["result"]["tools"]
             .as_array()
             .unwrap()
             .len(),
-        54
+        55
     );
 }
 #[tokio::test]

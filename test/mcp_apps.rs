@@ -425,3 +425,61 @@ async fn availability_continuation_is_accepted_without_skipping_free_windows() {
         89
     );
 }
+
+#[tokio::test]
+async fn kdrive_lists_accessible_drives_and_separates_wrong_drives_from_revoked_tokens() {
+    let h = Harness::new().await;
+    h.mock.lock().unwrap().responses.insert(
+        "GET /2/drive/init?with=drives".into(),
+        json!({"data":{"drives":[{"id":9,"name":"Team Ensemble","account_id":1480441,"role":"user","in_maintenance":false,"quota":{"used":1}}],"users":[{"id":1}]}}),
+    );
+    let drives = h.call("kdrive_list_drives", json!({})).await;
+    assert_eq!(drives["result"]["isError"], false, "{drives}");
+    assert_eq!(
+        result(&drives)["data"],
+        json!([{"id":9,"name":"Team Ensemble","account_id":1480441,"role":"user","in_maintenance":false,"source_url":"https://kdrive.infomaniak.com/app/drive/9/files/1"}])
+    );
+    h.mock.lock().unwrap().response_statuses.insert(
+        "GET /3/drive/77/files/1/files".into(),
+        StatusCode::UNAUTHORIZED,
+    );
+    let wrong = h.call("kdrive_list", json!({"drive_id":77})).await;
+    assert_eq!(
+        wrong["result"]["_meta"]["error_code"], "drive_not_accessible",
+        "{wrong}"
+    );
+    let health: String = h
+        .app
+        .store
+        .with(|c| {
+            Ok(c.query_row(
+                "SELECT health FROM connections WHERE user_id=?",
+                [h.user.id],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(health, "connected");
+    h.mock
+        .lock()
+        .unwrap()
+        .response_statuses
+        .insert("GET /2/profile".into(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        h.call("kdrive_list", json!({"drive_id":77})).await["error"],
+        "reconnection_required"
+    );
+    for invalid in [json!({"data":{}}), json!({"data":{"drives":[{"id":"9"}]}})] {
+        h.mock
+            .lock()
+            .unwrap()
+            .responses
+            .insert("GET /2/drive/init?with=drives".into(), invalid);
+        h.mock.lock().unwrap().response_statuses.clear();
+        let out = h.call("kdrive_list_drives", json!({})).await;
+        assert_eq!(
+            out["result"]["_meta"]["error_code"], "provider_error",
+            "{out}"
+        );
+    }
+}

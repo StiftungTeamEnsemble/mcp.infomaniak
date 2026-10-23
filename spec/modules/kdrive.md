@@ -6,8 +6,9 @@ Baseline: [tools](https://github.com/Infomaniak/mcp-server-kdrive#tools), [schem
 
 ## Tools
 
-Every tool additionally requires numeric `drive_id` for a user-authorised drive; signatures omit it. Item/directory IDs are numeric.
+Except `kdrive_list_drives`, every tool additionally requires numeric `drive_id` for a user-authorised drive; signatures omit it. Item/directory IDs are numeric.
 
+- `kdrive_list_drives()` → accessible drives with `id`, `name`, `account_id`, `role`, maintenance state and root link (project extension: the reference configures one drive ID; `GET /2/drive/init?with=drives`, as Infomaniak's kDrive apps use).
 - `kdrive_search(query, directory_id?, depth?, cursor?)` → drive-wide or selected-folder matches; folder depth: `child|unlimited`.
 - `kdrive_list(file_id=1, type?, cursor?)` → folder items, `has_more`, continuation `cursor`; type: `file|dir`.
 - `kdrive_show_folder(file_id=1, type?, cursor?)` → the same authorised folder page plus `context.folder_name` in an [inline MCP App](../mcp.md#mcp-apps), with an expandable tree. Each branch loads and paginates on demand; repeated ancestors and branches deeper than 16 levels require opening kDrive.
@@ -31,6 +32,7 @@ Every tool additionally requires numeric `drive_id` for a user-authorised drive;
 
 ## Behaviour
 
+- Infomaniak answers 401 for drives the token cannot access. When the profile still accepts the token, return `drive_not_accessible` (a tool error pointing to `kdrive_list_drives`) instead of requiring reconnection.
 - Keep drive identity in every item reference; sharing cannot exceed rights the acting user may delegate.
 - Validate numeric file identities and any returned drive identity before returning metadata, caching references or downloading. Direct metadata must match the requested file; malformed upload/folder-creation results report uncertainty with destination context. Resource IDs follow the same numeric bounds as tool IDs.
 - Rename, move, restore and delete acknowledgements must be objects; identities may be omitted, but any returned file/drive IDs must match the requested objects. Malformed mutation results retain known and safe returned file/drive IDs for recovery. Sharing IDs identify links/invitations rather than files.
