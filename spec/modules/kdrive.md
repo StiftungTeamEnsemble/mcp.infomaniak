@@ -11,7 +11,7 @@ Except `kdrive_list_drives`, every tool additionally requires numeric `drive_id`
 - `kdrive_list_drives()` → accessible drives with `id`, `name`, `account_id`, `role`, maintenance state and root link (project extension: the reference configures one drive ID; `GET /2/drive/init?with=drives`, as Infomaniak's kDrive apps use).
 - `kdrive_search(query, directory_id?, depth?, cursor?)` → drive-wide or selected-folder matches; folder depth: `child|unlimited`.
 - `kdrive_list(file_id=1, type?, cursor?)` → folder items, `has_more`, continuation `cursor`; type: `file|dir`.
-- `kdrive_show_folder(file_id=1, type?, cursor?)` → the same authorised folder page plus `context.folder_name` in an [inline MCP App](../mcp.md#mcp-apps), with an expandable tree. Each branch loads and paginates on demand; repeated ancestors and branches deeper than 16 levels require opening kDrive.
+- `kdrive_show_folder(file_id=1, type?, cursor?)` → the same authorised folder page plus `context.folder_name` in an [inline MCP App](../mcp.md#mcp-apps), with an expandable tree. Files and folders (↗ after the name) open in kDrive; each branch loads and paginates on demand; repeated ancestors and branches deeper than 16 levels require opening kDrive.
 - `kdrive_info(file_id)` → item metadata.
 - `kdrive_recents(type?, cursor?)` → recent items; type: `file|dir|vault`.
 - `kdrive_shared_with_me(type?, cursor?)` → shared items; same type filter.

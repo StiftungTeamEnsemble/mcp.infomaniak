@@ -10,3 +10,4 @@
 *.sqlite*
 *.db*
 /.infomaniak-token
+**/__*

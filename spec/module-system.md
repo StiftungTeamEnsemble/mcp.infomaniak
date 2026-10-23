@@ -30,3 +30,5 @@ Use these tool/provider-call references; authentication follows our [browser-bas
 - [Infomaniak kDrive MCP](https://github.com/Infomaniak/mcp-server-kdrive)
 - [Infomaniak kChat MCP](https://github.com/Infomaniak/mcp-server-kchat)
 - [Infomaniak Mail MCP](https://github.com/Infomaniak/mcp-server-mail)
+
+Checked 2026-10-23: all four reference servers expose data tools over stdio; their default-branch tool registrations and dependencies contain no MCP App views or UI template metadata. kDrive file resources and Mail attachment content are data, not app views. This project's [four focused MCP Apps](mcp.md#mcp-apps) are implemented locally.

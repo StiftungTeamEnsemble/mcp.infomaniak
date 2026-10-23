@@ -17,6 +17,15 @@ ui.mount((initial, input) => {
         if (item.type === 'dir') {
           const details = ui.element('details');
           const summary = ui.element('summary', item.name, 'folder-label');
+          if (item.source_url) {
+            const open = ui.link('↗', item.source_url);
+            open.classList.add('folder-open');
+            open.setAttribute('aria-label', `Open ${item.name} in kDrive`);
+            open.title = 'Open in kDrive';
+            // Opening the folder in kDrive must not also expand or collapse it here.
+            open.addEventListener('click', event => event.preventDefault());
+            summary.append(open);
+          }
           details.append(summary);
           let loaded = false, loading = false;
           details.ontoggle = async () => {
