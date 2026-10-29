@@ -25,6 +25,8 @@ use tower::ServiceExt;
 
 #[path = "mcp_apps.rs"]
 mod mcp_app_tests;
+#[path = "membership.rs"]
+mod membership_tests;
 
 #[derive(Default)]
 struct Mock {
@@ -383,6 +385,7 @@ fn cfg() -> Config {
         allowed_domains: ["team-ensemble.ch".into()].into_iter().collect(),
         bind_addr: "127.0.0.1:3000".into(),
         kchat_team: Some("ensemble".into()),
+        membership: None,
     }
 }
 fn credential(app: &App, user: i64, token: &str, expires: i64) {
@@ -486,6 +489,31 @@ fn environment_is_strict_and_domains_are_exact() {
             .map(|(_, v)| v.to_string())
     };
     let config = Config::load(load).unwrap();
+    assert!(config.membership.is_none());
+    let configured = Config::load(|key| match key {
+        "INFOMANIAK_ACCOUNT_ID" => Some("1480441".into()),
+        "INFOMANIAK_MEMBERSHIP_READER_ID" => Some("9001".into()),
+        _ => load(key),
+    })
+    .unwrap();
+    assert_eq!(configured.membership.as_ref().unwrap().account_id, 1480441);
+    for (account, reader) in [
+        ("1480441", ""),
+        ("", "9001"),
+        ("0", "9001"),
+        ("1480441", "../9001"),
+        ("01", "9001"),
+        ("1480441", "9223372036854775808"),
+    ] {
+        assert!(
+            Config::load(|key| match key {
+                "INFOMANIAK_ACCOUNT_ID" => Some(account.into()),
+                "INFOMANIAK_MEMBERSHIP_READER_ID" => Some(reader.into()),
+                _ => load(key),
+            })
+            .is_err()
+        );
+    }
     assert!(config.admits("a@TEAM-ENSEMBLE.CH"));
     for email in [
         "a@sub.team-ensemble.ch",
@@ -4819,7 +4847,7 @@ async fn kchat_without_a_configured_team_exposes_no_data() {
                 "PUBLIC_URL" => Some("https://mcp.example.org"),
                 "CREDENTIAL_ENCRYPTION_KEY" => Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
                 "ALLOWED_EMAIL_DOMAINS" => Some("team-ensemble.ch"),
-                "BIND_ADDR" => None,
+                "BIND_ADDR" | "INFOMANIAK_ACCOUNT_ID" | "INFOMANIAK_MEMBERSHIP_READER_ID" => None,
                 _ => Some("value"),
             }
             .map(String::from)

@@ -18,6 +18,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use url::Url;
 
+mod membership;
+
 pub const ISSUER: &str = "https://login.infomaniak.com";
 pub const MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -229,10 +231,12 @@ impl Provider {
 
     pub async fn verify_id(
         &self,
+        app: &App,
         token: &str,
-        client_id: &str,
         nonce: Option<&str>,
+        expected_subject: Option<&str>,
     ) -> Result<Claims> {
+        let client_id = &app.config.client_id;
         let header = decode_header(token).map_err(|_| authentication_error("id_token_invalid"))?;
         if header.alg != Algorithm::RS256 {
             return Err(authentication_error("id_token_algorithm_invalid"));
@@ -273,11 +277,14 @@ impl Provider {
         {
             return Err(authentication_error("id_token_claims_invalid"));
         }
-        if !claims.email_verified {
-            return Err(authentication_error("email_not_verified"));
-        }
         if nonce.is_some_and(|n| claims.nonce.as_deref() != Some(n)) {
             return Err(authentication_error("nonce_mismatch"));
+        }
+        if expected_subject.is_some_and(|subject| subject != claims.sub) {
+            return Err(Error::denied());
+        }
+        if !claims.email_verified {
+            self.verify_member(app, &claims).await?;
         }
         Ok(claims)
     }
@@ -334,10 +341,7 @@ impl Provider {
         .await
         .map_err(|_| Error::reconnect())?;
         if let Some(id) = response["id_token"].as_str() {
-            let claims = self.verify_id(id, &app.config.client_id, None).await?;
-            if claims.sub != user.subject {
-                return Err(Error::denied());
-            }
+            let claims = self.verify_id(app, id, None, Some(&user.subject)).await?;
             app.store.admit(
                 &app.config,
                 &claims.iss,
@@ -639,14 +643,19 @@ async fn complete_callback(app: &App, headers: &HeaderMap, q: Callback) -> Resul
         true,
     )
     .await?;
+    let expected_subject = flow
+        .user
+        .map(|id| app.store.user(id).map(|user| user.subject))
+        .transpose()?;
     let claims = app
         .provider
         .verify_id(
+            app,
             result["id_token"]
                 .as_str()
                 .ok_or_else(|| authentication_error("id_token_missing"))?,
-            &app.config.client_id,
             Some(&flow.nonce),
+            expected_subject.as_deref(),
         )
         .await?;
     let user = app.store.admit(

@@ -14,6 +14,19 @@ pub struct Config {
     pub bind_addr: String,
     /// Optional kChat team name; a lowercase DNS label forming the kChat host.
     pub kchat_team: Option<String>,
+    pub membership: Option<Membership>,
+}
+
+#[derive(Clone)]
+pub struct Membership {
+    pub account_id: u64,
+    /// Infomaniak subject of an active local administrator with a saved personal token.
+    pub reader_id: u64,
+}
+
+pub fn provider_id(value: &str) -> Option<u64> {
+    let id = value.parse::<u64>().ok()?;
+    (id > 0 && id <= i64::MAX as u64 && id.to_string() == value).then_some(id)
 }
 
 impl Config {
@@ -80,6 +93,28 @@ impl Config {
         }) {
             return Err(Error::config("KCHAT_TEAM"));
         }
+        let optional = |key| {
+            get(key)
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+        };
+        let membership = match (
+            optional("INFOMANIAK_ACCOUNT_ID"),
+            optional("INFOMANIAK_MEMBERSHIP_READER_ID"),
+        ) {
+            (None, None) => None,
+            (Some(account), Some(reader)) => Some(Membership {
+                account_id: provider_id(&account)
+                    .ok_or_else(|| Error::config("INFOMANIAK_ACCOUNT_ID"))?,
+                reader_id: provider_id(&reader)
+                    .ok_or_else(|| Error::config("INFOMANIAK_MEMBERSHIP_READER_ID"))?,
+            }),
+            _ => {
+                return Err(Error::config(
+                    "Set both INFOMANIAK_ACCOUNT_ID and INFOMANIAK_MEMBERSHIP_READER_ID",
+                ));
+            }
+        };
         Ok(Self {
             public_url: origin.origin().ascii_serialization(),
             sqlite_path: required("SQLITE_PATH")?,
@@ -89,6 +124,7 @@ impl Config {
             allowed_domains,
             bind_addr,
             kchat_team,
+            membership,
         })
     }
 

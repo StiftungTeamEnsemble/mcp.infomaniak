@@ -11,6 +11,8 @@ INFOMANIAK_CLIENT_SECRET=<client-secret>       # Configure once on the server
 ALLOWED_EMAIL_DOMAINS=team-ensemble.ch          # Comma-separated login domains
 BIND_ADDR=127.0.0.1:3000                       # Optional internal listener; Compose uses 0.0.0.0:3000
 KCHAT_TEAM=team-name                           # Optional kChat team (subdomain of <team>.kchat.infomaniak.com)
+INFOMANIAK_ACCOUNT_ID=                         # Optional organisation-member admission; set both IDs
+INFOMANIAK_MEMBERSHIP_READER_ID=                # Infomaniak user ID of the directory-reading administrator
 ```
 
 - Replace placeholders; reject missing/invalid values at startup. `KCHAT_TEAM` must be a single DNS label; it only selects the host under `kchat.infomaniak.com`.
@@ -19,11 +21,12 @@ KCHAT_TEAM=team-name                           # Optional kChat team (subdomain 
 - Compose uses `/data/mcp.sqlite` in its named volume regardless of the native example's `SQLITE_PATH` value. Restrict the data directory and backups to the application/operator; the database file is created with mode `0600` on Unix.
 - Register the exact `PUBLIC_URL` + `/auth/infomaniak/callback` URL in the [Infomaniak application setup](identity.md#before-implementation).
 - For local integration testing, use the [development tunnel origin and isolated credentials](development.md#local-chatgpt-testing).
+- Set both membership IDs or neither; require canonical positive numeric IDs. [Member admission](identity.md#organisation-member-admission) reuses the designated active local administrator's saved personal token, which needs account-user read access. No additional secret is configured. Replacing that administrator's token uses the existing portal setup; disconnecting it or removing the administrator role stops this admission path. Production organisation: `1480441` (Stiftung Team Ensemble).
 
 ## Domain restriction
 
 - Require a nonempty allowlist; match canonical email domains exactly, ignoring case. Subdomains require explicit entries.
-- Require email from validated Infomaniak OIDC with `email_verified=true`; reject missing/unverified emails and client-supplied identity claims.
-- Enforce at sign-in, account linking and every request, including existing sessions after allowlist changes. Apply an existing identity's latest validated email even when its new domain is rejected, including claims observed during token renewal.
+- Require email from validated Infomaniak OIDC with `email_verified=true`, or the configured [organisation-member admission](identity.md#organisation-member-admission) evidence. Reject missing emails and client-supplied identity claims. Membership evidence is an alternative admission policy; it does not change the provider's verification flag.
+- Enforce the domain allowlist at sign-in, account linking and every request, including existing sessions after allowlist changes. Apply an existing identity's latest admitted email even when its new domain is rejected, including claims observed during token renewal.
 - Domain matching alone establishes neither identity nor permissions; admission follows [onboarding policy](identity.md#onboarding) and [access rules](access.md).
 - Restrict user identities, not mail recipients, invitees or shared-resource domains.

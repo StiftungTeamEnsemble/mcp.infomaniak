@@ -10,7 +10,15 @@
 ## Sign-in failures
 
 - Rejected OIDC callbacks record `authentication.callback` with a static failure code and the response's `x-request-id`; never log tokens, cookies, flow selectors or identity claims. Identity/flow validation retains HTTP 401 `invalid_token` and adds `context.authentication_failure` to distinguish missing cookies, invalid/expired flows and identity-token failures. Other callback errors retain their status/code and use that code in the audit outcome.
-- For a missing cookie or invalid/expired flow, restart at the portal in one browser tab and finish within ten minutes. For `email_not_verified`, verify the Infomaniak login email. Other identity-token failures require investigation; never relax OIDC validation to admit an account. Before this diagnostic change, generic rejected-request logs cannot establish the cause of a failed sign-in.
+- For a missing cookie or invalid/expired flow, restart at the portal in one browser tab and finish within ten minutes. Other identity-token failures require investigation; preserve cryptographic validation. Before safe callback diagnostics, generic rejected-request logs cannot establish the cause of a failed sign-in.
+- `email_not_verified` means the validated identity token contains `email_verified=false` and member admission is not configured. It does not establish incomplete organisation onboarding. `membership_not_confirmed` and `membership_identity_mismatch` reject insufficient or conflicting directory evidence; `membership_unavailable` (503) requires the administrator to restore the directory lookup.
+
+## Organisation-member admission
+
+- Decision 2026-10-29: optionally admit normal organisation members whose signed OIDC token has `email_verified=false`. Preserve issuer, signature, audience, expiry, nonce, authorised-party and exact-subject binding checks. The email-domain policy, local approval/suspension, default grants and personal-token ownership checks still apply.
+- Configure the [organisation and reader IDs](environment.md). Resolve the reader by Infomaniak issuer/subject to an active, domain-eligible local administrator with a current saved personal token. Use it only for `GET /1/account/{account_id}/user/{signed_subject}` (verified live for organisation `1480441` on 2026-10-29); never select the reader or organisation from a client request and never copy its key into the member's connection.
+- Require a canonical numeric signed subject, matching returned user ID and email, and matching account ID if returned. Require explicit `status=valid`, `type=normal`, `is_blocked=false` and `invalid_email=false`. `no_access` and `workspace_only` do not disqualify these members. The directory result is independent admission evidence, not a claim that OIDC email verification is true.
+- Check membership on sign-in and whenever a renewed ID token requires this evidence; do not cache results. Fail closed on missing, malformed or unavailable evidence. After the asynchronous lookup, recheck the reader's current status/domain/admin role and exact stored credential. Existing sessions retain normal expiry and local access checks; staff offboarding still uses local suspension until automatic provider lifecycle integration is implemented.
 
 ## Onboarding
 

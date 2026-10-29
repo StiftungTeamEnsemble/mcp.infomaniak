@@ -33,6 +33,8 @@ cargo run -- admin '<exact Infomaniak subject from users>'
 
 Services start disabled. Complete the [two-employee provider verification](spec/identity.md#before-implementation), record its evidence under Administration → Services, enable the verified services and set user/group grants. Employees connect by pasting a personal Infomaniak API token in the portal, which guides them through creating it. Add `PUBLIC_URL/mcp` as an OAuth MCP connection in ChatGPT or Claude and approve client-specific scopes.
 
+To admit organisation members whose OIDC email-verification flag is false, configure [member admission](spec/identity.md#organisation-member-admission). The directory lookup reuses a designated administrator's saved key; employees still save and use their own API keys.
+
 ## Docker Compose
 
 ```sh
