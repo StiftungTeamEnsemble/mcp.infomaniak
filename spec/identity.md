@@ -7,6 +7,11 @@
 - Use authorisation code + PKCE S256 with `openid profile email`; trust issuer `https://login.infomaniak.com` and its [discovery metadata](https://login.infomaniak.com/.well-known/openid-configuration).
 - Validate OIDC responses; bind local accounts to `(iss, sub)`. Email changes never relink accounts.
 
+## Sign-in failures
+
+- Rejected OIDC callbacks record `authentication.callback` with a static failure code and the response's `x-request-id`; never log tokens, cookies, flow selectors or identity claims. Identity/flow validation retains HTTP 401 `invalid_token` and adds `context.authentication_failure` to distinguish missing cookies, invalid/expired flows and identity-token failures. Other callback errors retain their status/code and use that code in the audit outcome.
+- For a missing cookie or invalid/expired flow, restart at the portal in one browser tab and finish within ten minutes. For `email_not_verified`, verify the Infomaniak login email. Other identity-token failures require investigation; never relax OIDC validation to admit an account. Before this diagnostic change, generic rejected-request logs cannot establish the cause of a failed sign-in.
+
 ## Onboarding
 
 - Automatically create a regular local user after the first login passes the [verified-domain policy](environment.md#domain-restriction); apply administrator-defined default service grants.

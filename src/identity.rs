@@ -21,6 +21,11 @@ use url::Url;
 pub const ISSUER: &str = "https://login.infomaniak.com";
 pub const MAX_BYTES: usize = 8 * 1024 * 1024;
 
+/// Static failure codes only: never include tokens, claims, cookies or flow selectors.
+fn authentication_error(reason: &'static str) -> Error {
+    Error::unauthorized().with_context(json!({"authentication_failure":reason}))
+}
+
 #[derive(Clone, Deserialize)]
 pub struct Metadata {
     pub issuer: String,
@@ -228,17 +233,22 @@ impl Provider {
         client_id: &str,
         nonce: Option<&str>,
     ) -> Result<Claims> {
-        let header = decode_header(token).map_err(|_| Error::unauthorized())?;
+        let header = decode_header(token).map_err(|_| authentication_error("id_token_invalid"))?;
         if header.alg != Algorithm::RS256 {
-            return Err(Error::unauthorized());
+            return Err(authentication_error("id_token_algorithm_invalid"));
         }
         let jwks: JwkSet = serde_json::from_value(
             Self::json(self.http.get(&self.metadata.jwks_uri), false).await?,
         )
-        .map_err(|_| Error::unauthorized())?;
+        .map_err(|_| authentication_error("id_token_jwks_invalid"))?;
         let key = jwks
-            .find(header.kid.as_deref().ok_or_else(Error::unauthorized)?)
-            .ok_or_else(Error::unauthorized)?;
+            .find(
+                header
+                    .kid
+                    .as_deref()
+                    .ok_or_else(|| authentication_error("id_token_key_missing"))?,
+            )
+            .ok_or_else(|| authentication_error("id_token_key_unknown"))?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&[ISSUER]);
         validation.set_audience(&[client_id]);
@@ -246,23 +256,28 @@ impl Provider {
         validation.validate_nbf = true;
         let claims = decode::<Claims>(
             token,
-            &DecodingKey::from_jwk(key).map_err(|_| Error::unauthorized())?,
+            &DecodingKey::from_jwk(key)
+                .map_err(|_| authentication_error("id_token_key_invalid"))?,
             &validation,
         )
-        .map_err(|_| Error::unauthorized())?
+        .map_err(|_| authentication_error("id_token_invalid"))?
         .claims;
         if claims.sub.is_empty()
             || claims.iat > now() + 30
             || claims.iat > claims.exp as i64
-            || !claims.email_verified
-            || nonce.is_some_and(|n| claims.nonce.as_deref() != Some(n))
             || claims.azp.as_deref().is_some_and(|a| a != client_id)
             || claims
                 .aud
                 .as_array()
                 .is_some_and(|a| a.len() > 1 && claims.azp.as_deref() != Some(client_id))
         {
-            return Err(Error::unauthorized());
+            return Err(authentication_error("id_token_claims_invalid"));
+        }
+        if !claims.email_verified {
+            return Err(authentication_error("email_not_verified"));
+        }
+        if nonce.is_some_and(|n| claims.nonce.as_deref() != Some(n)) {
+            return Err(authentication_error("nonce_mismatch"));
         }
         Ok(claims)
     }
@@ -563,7 +578,27 @@ pub async fn callback(
     headers: HeaderMap,
     Query(q): Query<Callback>,
 ) -> Result<Response> {
-    let binding = cookie(&headers, "__Host-mcp_flow").ok_or_else(Error::unauthorized)?;
+    let result = complete_callback(&app, &headers, q).await;
+    if let Err(error) = &result {
+        let reason = error
+            .context
+            .as_ref()
+            .and_then(|context| context["authentication_failure"].as_str())
+            .unwrap_or(error.code);
+        app.store.audit(
+            crate::web::request_id(&headers),
+            None,
+            None,
+            "authentication.callback",
+            &format!("rejected {reason}"),
+        )?;
+    }
+    result
+}
+
+async fn complete_callback(app: &App, headers: &HeaderMap, q: Callback) -> Result<Response> {
+    let binding = cookie(headers, "__Host-mcp_flow")
+        .ok_or_else(|| authentication_error("flow_cookie_missing"))?;
     let state_hash = crypto::hash(&q.state);
     let secret = app.store.with(|c| {
         c.query_row(
@@ -572,7 +607,7 @@ pub async fn callback(
             |r| r.get::<_, Vec<u8>>(0),
         )
         .optional()?
-        .ok_or_else(Error::unauthorized)
+        .ok_or_else(|| authentication_error("flow_invalid_or_expired"))
     })?;
     let flow: Login = serde_json::from_slice(&crypto::open(
         &app.config.encryption_key,
@@ -609,7 +644,7 @@ pub async fn callback(
         .verify_id(
             result["id_token"]
                 .as_str()
-                .ok_or_else(Error::unauthorized)?,
+                .ok_or_else(|| authentication_error("id_token_missing"))?,
             &app.config.client_id,
             Some(&flow.nonce),
         )
@@ -623,7 +658,7 @@ pub async fn callback(
     )?;
     app.check_user(&user, false)?;
     if let Some(expected) = flow.user {
-        let (session_user, _) = crate::web::session(&app, &headers, false)?;
+        let (session_user, _) = crate::web::session(app, headers, false)?;
         if user.id != expected || session_user.id != expected {
             return Err(Error::denied());
         }
@@ -651,7 +686,7 @@ pub async fn callback(
                 .filter(|n| *n > 0 && *n <= 86400 * 30)
                 .ok_or_else(Error::reconnect)?;
         save_credential(
-            &app,
+            app,
             user.id,
             crate::modules::INFOMANIAK,
             &credential,
@@ -659,14 +694,14 @@ pub async fn callback(
             expires,
         )?;
         app.store.audit(
-            crate::web::request_id(&headers),
+            crate::web::request_id(headers),
             Some(user.id),
             None,
             "credential.connect",
             "ok",
         )?;
     }
-    if let Some(old) = cookie(&headers, "__Host-mcp_session") {
+    if let Some(old) = cookie(headers, "__Host-mcp_session") {
         app.store.with(|c| {
             c.execute("DELETE FROM sessions WHERE hash=?", [crypto::hash(&old)])?;
             Ok(())
@@ -682,7 +717,7 @@ pub async fn callback(
         Ok(())
     })?;
     app.store.audit(
-        crate::web::request_id(&headers),
+        crate::web::request_id(headers),
         Some(user.id),
         None,
         "authentication.login",

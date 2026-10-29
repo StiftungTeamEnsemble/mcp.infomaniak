@@ -3771,6 +3771,108 @@ async fn oidc_claim_failures_never_create_trusted_sessions() {
     }
 }
 #[tokio::test]
+async fn failed_browser_sign_in_reports_safe_reasons_without_creating_sessions() {
+    for (failure, expected) in [
+        ("cookie", "flow_cookie_missing"),
+        ("expired", "flow_invalid_or_expired"),
+        ("binding", "flow_invalid_or_expired"),
+        ("email", "email_not_verified"),
+        ("nonce", "nonce_mismatch"),
+        ("jwt", "id_token_invalid"),
+    ] {
+        let h = Harness::new().await;
+        let start = request(&h.app, "GET", "/auth/login", Value::Null, &[]).await;
+        let url = url::Url::parse(start.headers["location"].to_str().unwrap()).unwrap();
+        let query = url.query_pairs().into_owned().collect::<HashMap<_, _>>();
+        {
+            let mut mock = h.mock.lock().unwrap();
+            mock.nonce = query["nonce"].clone();
+            mock.claims = match failure {
+                "email" => json!({"email_verified":false}),
+                "nonce" => json!({"nonce":"private-wrong-nonce"}),
+                "jwt" => json!({"aud":"private-wrong-audience"}),
+                _ => json!({}),
+            };
+        }
+        if failure == "expired" {
+            h.app
+                .store
+                .with(|c| {
+                    c.execute(
+                        "UPDATE flows SET expires=? WHERE hash=?",
+                        params![now() - 1, crypto::hash(&query["state"])],
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+        }
+        let headers = match failure {
+            "cookie" => vec![],
+            "binding" => vec![("cookie", "__Host-mcp_flow=private-wrong-binding".into())],
+            _ => vec![("cookie", cookies(&start.headers))],
+        };
+        let before = h
+            .app
+            .store
+            .with(|c| Ok(c.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get::<_, i64>(0))?))
+            .unwrap();
+        let response = request(
+            &h.app,
+            "GET",
+            &format!(
+                "/auth/infomaniak/callback?state={}&code=private-provider-code",
+                query["state"]
+            ),
+            Value::Null,
+            &headers,
+        )
+        .await;
+        assert_eq!(response.status, 401);
+        assert_eq!(response.value["error"], "invalid_token");
+        assert_eq!(
+            response.value["context"]["authentication_failure"],
+            expected
+        );
+        assert!(!cookies(&response.headers).contains("__Host-mcp_session="));
+        let (after, outcome, correlation, logs) = h.app.store.with(|c| {
+            let after = c.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get::<_, i64>(0))?;
+            let (outcome,correlation) = c.query_row("SELECT outcome,request_id FROM logs WHERE action='authentication.callback' ORDER BY id DESC LIMIT 1", [], |r| Ok((r.get::<_, String>(0)?,r.get::<_, String>(1)?)))?;
+            let logs = c.query_row("SELECT group_concat(action||outcome||request_id) FROM logs", [], |r| r.get::<_, String>(0))?;
+            Ok((after,outcome,correlation,logs))
+        }).unwrap();
+        assert_eq!(before, after);
+        assert_eq!(outcome, format!("rejected {expected}"));
+        assert_eq!(
+            correlation,
+            response.headers["x-request-id"].to_str().unwrap()
+        );
+        let diagnostic = format!("{} {logs}", response.value);
+        for secret in [
+            &query["state"],
+            &query["nonce"],
+            "private-provider-code",
+            "private-wrong-nonce",
+            "private-wrong-audience",
+            "private-wrong-binding",
+            "delegated-a",
+            "refresh-a",
+            "alice@team-ensemble.ch",
+        ] {
+            assert!(!diagnostic.contains(secret), "Leaked {secret}");
+        }
+        if matches!(failure, "cookie" | "expired" | "binding") {
+            assert!(
+                !h.mock
+                    .lock()
+                    .unwrap()
+                    .calls
+                    .iter()
+                    .any(|call| call.1.starts_with("/token?"))
+            );
+        }
+    }
+}
+#[tokio::test]
 async fn oauth_state_is_cookie_bound_and_single_use() {
     let h = Harness::new().await;
     let start = request(&h.app, "GET", "/auth/login", Value::Null, &[]).await;
