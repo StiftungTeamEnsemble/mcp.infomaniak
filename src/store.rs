@@ -108,7 +108,7 @@ impl Store {
             };
             tx.commit()?; Ok(id)
         })?;
-        // Retain a known identity's latest verified claims even when its new
+        // Retain a known identity's latest authenticated claims even when its new
         // domain is ineligible, so older sessions and grants fail closed too.
         if !admitted {
             return Err(Error::denied());

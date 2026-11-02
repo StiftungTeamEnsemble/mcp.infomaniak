@@ -23,10 +23,10 @@ use std::{
 };
 use tower::ServiceExt;
 
+#[path = "identity_admission.rs"]
+mod identity_admission_tests;
 #[path = "mcp_apps.rs"]
 mod mcp_app_tests;
-#[path = "membership.rs"]
-mod membership_tests;
 
 #[derive(Default)]
 struct Mock {
@@ -385,7 +385,6 @@ fn cfg() -> Config {
         allowed_domains: ["team-ensemble.ch".into()].into_iter().collect(),
         bind_addr: "127.0.0.1:3000".into(),
         kchat_team: Some("ensemble".into()),
-        membership: None,
     }
 }
 fn credential(app: &App, user: i64, token: &str, expires: i64) {
@@ -489,31 +488,6 @@ fn environment_is_strict_and_domains_are_exact() {
             .map(|(_, v)| v.to_string())
     };
     let config = Config::load(load).unwrap();
-    assert!(config.membership.is_none());
-    let configured = Config::load(|key| match key {
-        "INFOMANIAK_ACCOUNT_ID" => Some("1480441".into()),
-        "INFOMANIAK_MEMBERSHIP_READER_ID" => Some("9001".into()),
-        _ => load(key),
-    })
-    .unwrap();
-    assert_eq!(configured.membership.as_ref().unwrap().account_id, 1480441);
-    for (account, reader) in [
-        ("1480441", ""),
-        ("", "9001"),
-        ("0", "9001"),
-        ("1480441", "../9001"),
-        ("01", "9001"),
-        ("1480441", "9223372036854775808"),
-    ] {
-        assert!(
-            Config::load(|key| match key {
-                "INFOMANIAK_ACCOUNT_ID" => Some(account.into()),
-                "INFOMANIAK_MEMBERSHIP_READER_ID" => Some(reader.into()),
-                _ => load(key),
-            })
-            .is_err()
-        );
-    }
     assert!(config.admits("a@TEAM-ENSEMBLE.CH"));
     for email in [
         "a@sub.team-ensemble.ch",
@@ -3778,7 +3752,8 @@ async fn browser_login_validates_oidc_and_rotates_session() {
 #[tokio::test]
 async fn oidc_claim_failures_never_create_trusted_sessions() {
     for overrides in [
-        json!({"email_verified":false}),
+        json!({"email":null}),
+        json!({"email":""}),
         json!({"email":"a@evil.example"}),
         json!({"nonce":"forged"}),
         json!({"iss":"https://evil.example"}),
@@ -3790,7 +3765,9 @@ async fn oidc_claim_failures_never_create_trusted_sessions() {
         json!({"aud":["provider-client","second"],"azp":"second"}),
     ] {
         let h = Harness::new().await;
-        let response = login_callback(&h, overrides.clone()).await;
+        let mut input = overrides.clone();
+        input["email_verified"] = json!(false);
+        let response = login_callback(&h, input).await;
         assert!(
             !response.status.is_success() && !response.status.is_redirection(),
             "Accepted {overrides}"
@@ -3804,7 +3781,6 @@ async fn failed_browser_sign_in_reports_safe_reasons_without_creating_sessions()
         ("cookie", "flow_cookie_missing"),
         ("expired", "flow_invalid_or_expired"),
         ("binding", "flow_invalid_or_expired"),
-        ("email", "email_not_verified"),
         ("nonce", "nonce_mismatch"),
         ("jwt", "id_token_invalid"),
     ] {
@@ -3816,7 +3792,6 @@ async fn failed_browser_sign_in_reports_safe_reasons_without_creating_sessions()
             let mut mock = h.mock.lock().unwrap();
             mock.nonce = query["nonce"].clone();
             mock.claims = match failure {
-                "email" => json!({"email_verified":false}),
                 "nonce" => json!({"nonce":"private-wrong-nonce"}),
                 "jwt" => json!({"aud":"private-wrong-audience"}),
                 _ => json!({}),
@@ -4297,12 +4272,13 @@ async fn changed_domain_allowlist_invalidates_existing_sessions_and_tokens() {
     );
 }
 #[tokio::test]
-async fn newly_verified_ineligible_email_invalidates_old_sessions_and_other_services() {
-    for refresh in [false, true] {
+async fn newly_reported_ineligible_email_invalidates_old_sessions_and_other_services() {
+    for (refresh, email_verified) in [(false, true), (false, false), (true, true), (true, false)] {
         let h = Harness::new().await;
         if refresh {
             credential(&h.app, h.user.id, "expired", now() - 1);
-            h.mock.lock().unwrap().claims = json!({"email":"alice@outside.example"});
+            h.mock.lock().unwrap().claims =
+                json!({"email":"alice@outside.example","email_verified":email_verified});
             let denied = h
                 .rpc(
                     "tools/call",
@@ -4320,9 +4296,12 @@ async fn newly_verified_ineligible_email_invalidates_old_sessions_and_other_serv
             );
         } else {
             assert_eq!(
-                login_callback(&h, json!({"email":"alice@outside.example"}))
-                    .await
-                    .status,
+                login_callback(
+                    &h,
+                    json!({"email":"alice@outside.example","email_verified":email_verified})
+                )
+                .await
+                .status,
                 403
             );
         }
@@ -4355,7 +4334,7 @@ async fn renewal_updates_only_validated_claims_for_the_same_identity() {
         ),
         (
             json!({"email":"new@team-ensemble.ch","email_verified":false}),
-            "alice@team-ensemble.ch",
+            "new@team-ensemble.ch",
         ),
         (
             json!({"email":"new@team-ensemble.ch","sub":"other-employee"}),
@@ -4847,7 +4826,7 @@ async fn kchat_without_a_configured_team_exposes_no_data() {
                 "PUBLIC_URL" => Some("https://mcp.example.org"),
                 "CREDENTIAL_ENCRYPTION_KEY" => Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
                 "ALLOWED_EMAIL_DOMAINS" => Some("team-ensemble.ch"),
-                "BIND_ADDR" | "INFOMANIAK_ACCOUNT_ID" | "INFOMANIAK_MEMBERSHIP_READER_ID" => None,
+                "BIND_ADDR" => None,
                 _ => Some("value"),
             }
             .map(String::from)

@@ -11,18 +11,15 @@
 
 - Rejected OIDC callbacks record `authentication.callback` with a static failure code and the response's `x-request-id`; never log tokens, cookies, flow selectors or identity claims. Identity/flow validation retains HTTP 401 `invalid_token` and adds `context.authentication_failure` to distinguish missing cookies, invalid/expired flows and identity-token failures. Other callback errors retain their status/code and use that code in the audit outcome.
 - For a missing cookie or invalid/expired flow, restart at the portal in one browser tab and finish within ten minutes. Other identity-token failures require investigation; preserve cryptographic validation. Before safe callback diagnostics, generic rejected-request logs cannot establish the cause of a failed sign-in.
-- `email_not_verified` means the validated identity token contains `email_verified=false` and member admission is not configured. It does not establish incomplete organisation onboarding. `membership_not_confirmed` and `membership_identity_mismatch` reject insufficient or conflicting directory evidence; `membership_unavailable` (503) requires the administrator to restore the directory lookup.
 
-## Organisation-member admission
+## Email admission
 
-- Decision 2026-10-29: optionally admit normal organisation members whose signed OIDC token has `email_verified=false`. Preserve issuer, signature, audience, expiry, nonce, authorised-party and exact-subject binding checks. The email-domain policy, local approval/suspension, default grants and personal-token ownership checks still apply.
-- Configure the [organisation and reader IDs](environment.md). Resolve the reader by Infomaniak issuer/subject to an active, domain-eligible local administrator with a current saved personal token. Use it only for `GET /1/account/{account_id}/user/{signed_subject}` (verified live for organisation `1480441` on 2026-10-29); never select the reader or organisation from a client request and never copy its key into the member's connection.
-- Require a canonical numeric signed subject, matching returned user ID and email, and matching account ID if returned. Require explicit `status=valid`, `type=normal`, `is_blocked=false` and `invalid_email=false`. `no_access` and `workspace_only` do not disqualify these members. The directory result is independent admission evidence, not a claim that OIDC email verification is true.
-- Check membership on sign-in and whenever a renewed ID token requires this evidence; do not cache results. Fail closed on missing, malformed or unavailable evidence. After the asynchronous lookup, recheck the reader's current status/domain/admin role and exact stored credential. Existing sessions retain normal expiry and local access checks; staff offboarding still uses local suspension until automatic provider lifecycle integration is implemented.
+- Decision 2026-11-02: trust the email reported in a cryptographically validated Infomaniak OIDC token and apply the [allowed-domain policy](environment.md#domain-restriction). `email_verified` is not an admission condition and need not be present. Preserve issuer, signature, audience, expiry, nonce, authorised-party and exact-subject binding checks.
+- No organisation-member lookup or administrator API credential is required. This supersedes the 2026-10-29 membership fallback. Local approval/suspension, default grants, normal session expiry and personal-token ownership checks still apply; staff offboarding uses local suspension until automatic provider lifecycle integration is implemented.
 
 ## Onboarding
 
-- Automatically create a regular local user after the first login passes the [verified-domain policy](environment.md#domain-restriction); apply administrator-defined default service grants.
+- Automatically create a regular local user after the first login passes the [email admission policy](#email-admission); apply administrator-defined default service grants.
 - Support manual approval instead: eligible users remain pending until approved. Both modes use the same identity/domain checks.
 - Administrator roles require explicit assignment; suspended identities remain suspended across subsequent logins.
 - Manage groups and suspension locally. Staff offboarding uses admin suspension until an automatic provider lifecycle integration is verified.

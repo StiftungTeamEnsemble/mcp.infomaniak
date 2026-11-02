@@ -18,8 +18,6 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use url::Url;
 
-mod membership;
-
 pub const ISSUER: &str = "https://login.infomaniak.com";
 pub const MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -283,9 +281,6 @@ impl Provider {
         if expected_subject.is_some_and(|subject| subject != claims.sub) {
             return Err(Error::denied());
         }
-        if !claims.email_verified {
-            self.verify_member(app, &claims).await?;
-        }
         Ok(claims)
     }
 
@@ -418,7 +413,6 @@ pub struct Claims {
     pub exp: u64,
     pub iat: i64,
     pub email: String,
-    pub email_verified: bool,
     #[serde(default)]
     pub name: String,
     pub nonce: Option<String>,
