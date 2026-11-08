@@ -57,3 +57,18 @@ test('administration shows configuration without rendering supplied html',async(
   await page.goto('/');await page.getByRole('button',{name:'Administration'}).click();await expect(page.getByRole('heading',{name:'People'})).toBeVisible();await expect(page.locator('img')).toHaveCount(0);await expect(page.getByText('<img src=x onerror=alert(1)>')).toBeVisible();
   await page.screenshot({path:'test-results/admin.png',fullPage:true});
 });
+test('portal follows the server locale and translates known errors',async({page})=>{
+  await page.route('/',async r=>{const res=await r.fetch();r.fulfill({response:res,body:(await res.text()).replace('lang="en"','lang="de-CH"')})});
+  await page.goto('/');await expect(page.getByRole('link',{name:'Mit Infomaniak anmelden ↗'})).toHaveAttribute('href','/auth/login');
+  await expect(page).toHaveTitle('Team Ensemble · Verbindungen');
+  await page.route('**/api/me',r=>r.fulfill({json:account}));
+  await page.route('**/api/token',r=>r.fulfill({json:{error:'token_owner_mismatch',error_description:'This token belongs to another Infomaniak account'},status:403}));
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'Ihre Verbindungen'})).toBeVisible();
+  const setup=page.locator('section').filter({has:page.getByRole('heading',{name:'Infomaniak-Konto verbinden'})});
+  await expect(setup).toContainText('verbinden Mail, kDrive.');
+  await setup.getByLabel('Infomaniak-API-Token').fill('token-b');await setup.getByRole('button',{name:'Speichern und verbinden'}).click();
+  await expect(page.getByRole('alert')).toHaveText('Dieses Token gehört zu einem anderen Infomaniak-Konto.');
+  await expect(page.getByText('Nicht verfügbar')).toBeVisible();await expect(page.getByRole('heading',{name:'Kalender'})).toBeVisible();
+  await page.screenshot({path:'test-results/portal-de-ch.png',fullPage:true});
+});

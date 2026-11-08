@@ -211,8 +211,12 @@ async fn security(State(app): State<App>, mut request: Request, next: Next) -> R
     }
     response
 }
-async fn index() -> Html<&'static str> {
-    Html(include_str!("../web/index.html"))
+async fn index(State(app): State<App>) -> Html<String> {
+    Html(include_str!("../web/index.html").replacen(
+        "lang=\"en\"",
+        &format!("lang=\"{}\"", app.config.ui_locale),
+        1,
+    ))
 }
 async fn script() -> Result<Response> {
     let bytes = tokio::fs::read("web/dist/app.js").await.map_err(|_| {

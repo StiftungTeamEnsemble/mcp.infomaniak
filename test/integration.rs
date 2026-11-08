@@ -385,6 +385,7 @@ fn cfg() -> Config {
         allowed_domains: ["team-ensemble.ch".into()].into_iter().collect(),
         bind_addr: "127.0.0.1:3000".into(),
         kchat_team: Some("ensemble".into()),
+        ui_locale: "en",
     }
 }
 fn credential(app: &App, user: i64, token: &str, expires: i64) {
@@ -489,6 +490,16 @@ fn environment_is_strict_and_domains_are_exact() {
     };
     let config = Config::load(load).unwrap();
     assert!(config.admits("a@TEAM-ENSEMBLE.CH"));
+    assert_eq!(config.ui_locale, "en");
+    let swiss = Config::load(|k| {
+        if k == "UI_LOCALE" {
+            Some(" de-ch ".into())
+        } else {
+            load(k)
+        }
+    })
+    .unwrap();
+    assert_eq!(swiss.ui_locale, "de-CH");
     for email in [
         "a@sub.team-ensemble.ch",
         "a@evilteam-ensemble.ch",
@@ -506,6 +517,8 @@ fn environment_is_strict_and_domains_are_exact() {
         ("CREDENTIAL_ENCRYPTION_KEY", "short"),
         ("ALLOWED_EMAIL_DOMAINS", ""),
         ("ALLOWED_EMAIL_DOMAINS", "*.team-ensemble.ch"),
+        ("UI_LOCALE", "fr"),
+        ("UI_LOCALE", "de"),
     ] {
         assert!(
             Config::load(|k| if k == key {
@@ -516,6 +529,25 @@ fn environment_is_strict_and_domains_are_exact() {
             .is_err()
         );
     }
+}
+#[tokio::test]
+async fn portal_page_declares_the_configured_locale() {
+    let h = Harness::new().await;
+    let r = request(&h.app, "GET", "/", Value::Null, &[]).await;
+    assert!(
+        r.value
+            .as_str()
+            .unwrap()
+            .starts_with("<!doctype html>\n<html lang=\"en\">")
+    );
+    let mut app = h.app.clone();
+    app.config = Arc::new(Config {
+        ui_locale: "de-CH",
+        ..cfg()
+    });
+    let r = request(&app, "GET", "/", Value::Null, &[]).await;
+    let page = r.value.as_str().unwrap();
+    assert!(page.contains("<html lang=\"de-CH\">") && !page.contains("lang=\"en\""));
 }
 #[test]
 fn credentials_require_the_correct_key_and_owner() {
@@ -4826,7 +4858,7 @@ async fn kchat_without_a_configured_team_exposes_no_data() {
                 "PUBLIC_URL" => Some("https://mcp.example.org"),
                 "CREDENTIAL_ENCRYPTION_KEY" => Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
                 "ALLOWED_EMAIL_DOMAINS" => Some("team-ensemble.ch"),
-                "BIND_ADDR" => None,
+                "BIND_ADDR" | "UI_LOCALE" => None,
                 _ => Some("value"),
             }
             .map(String::from)

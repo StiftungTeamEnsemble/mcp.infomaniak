@@ -10,6 +10,7 @@ services:
       INFOMANIAK_CLIENT_SECRET: ${INFOMANIAK_CLIENT_SECRET:?}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:?}
       KCHAT_TEAM: ${KCHAT_TEAM:-}
+      UI_LOCALE: de-CH
       BIND_ADDR: 0.0.0.0:3000
       SQLITE_PATH: /data/mcp.sqlite
     expose:

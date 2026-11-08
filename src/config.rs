@@ -14,7 +14,12 @@ pub struct Config {
     pub bind_addr: String,
     /// Optional kChat team name; a lowercase DNS label forming the kChat host.
     pub kchat_team: Option<String>,
+    /// Portal language as a BCP 47 tag from [`UI_LOCALES`].
+    pub ui_locale: &'static str,
 }
+
+/// Languages the portal ships translations for; the first is the default.
+pub const UI_LOCALES: [&str; 2] = ["en", "de-CH"];
 
 impl Config {
     pub fn from_env() -> Result<Self> {
@@ -80,6 +85,13 @@ impl Config {
         }) {
             return Err(Error::config("KCHAT_TEAM"));
         }
+        let ui_locale = match get("UI_LOCALE").filter(|v| !v.trim().is_empty()) {
+            None => UI_LOCALES[0],
+            Some(v) => UI_LOCALES
+                .into_iter()
+                .find(|l| l.eq_ignore_ascii_case(v.trim()))
+                .ok_or_else(|| Error::config("UI_LOCALE"))?,
+        };
         Ok(Self {
             public_url: origin.origin().ascii_serialization(),
             sqlite_path: required("SQLITE_PATH")?,
@@ -89,6 +101,7 @@ impl Config {
             allowed_domains,
             bind_addr,
             kchat_team,
+            ui_locale,
         })
     }
 
