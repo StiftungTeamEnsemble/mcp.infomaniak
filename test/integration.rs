@@ -383,6 +383,7 @@ fn cfg() -> Config {
         client_id: "provider-client".into(),
         client_secret: "provider-secret".into(),
         allowed_domains: ["team-ensemble.ch".into()].into_iter().collect(),
+        allowed_emails: Default::default(),
         bind_addr: "127.0.0.1:3000".into(),
         kchat_team: Some("ensemble".into()),
         ui_locale: "en",
@@ -481,6 +482,7 @@ fn environment_is_strict_and_domains_are_exact() {
         ("INFOMANIAK_CLIENT_ID", "id"),
         ("INFOMANIAK_CLIENT_SECRET", "secret"),
         ("ALLOWED_EMAIL_DOMAINS", "TEAM-ENSEMBLE.CH"),
+        ("ALLOWED_EMAILS", " Guest.User@Example.COM , "),
     ];
     let load = |key: &str| {
         values
@@ -490,6 +492,8 @@ fn environment_is_strict_and_domains_are_exact() {
     };
     let config = Config::load(load).unwrap();
     assert!(config.admits("a@TEAM-ENSEMBLE.CH"));
+    assert!(config.admits("guest.user@example.com"));
+    assert!(config.admits("GUEST.USER@EXAMPLE.COM"));
     assert_eq!(config.ui_locale, "en");
     let swiss = Config::load(|k| {
         if k == "UI_LOCALE" {
@@ -507,6 +511,10 @@ fn environment_is_strict_and_domains_are_exact() {
         "a@@team-ensemble.ch",
         "@team-ensemble.ch",
         "a@team-ensemble.ch ",
+        "other@example.com",
+        "guest.user@sub.example.com",
+        "xguest.user@example.com",
+        "guest.user@example.com ",
     ] {
         assert!(!config.admits(email));
     }
@@ -517,6 +525,11 @@ fn environment_is_strict_and_domains_are_exact() {
         ("CREDENTIAL_ENCRYPTION_KEY", "short"),
         ("ALLOWED_EMAIL_DOMAINS", ""),
         ("ALLOWED_EMAIL_DOMAINS", "*.team-ensemble.ch"),
+        ("ALLOWED_EMAILS", "example.com"),
+        ("ALLOWED_EMAILS", "@example.com"),
+        ("ALLOWED_EMAILS", "a@@example.com"),
+        ("ALLOWED_EMAILS", "a b@example.com"),
+        ("ALLOWED_EMAILS", "a@*.example.com"),
         ("UI_LOCALE", "fr"),
         ("UI_LOCALE", "de"),
     ] {
@@ -4302,6 +4315,16 @@ async fn changed_domain_allowlist_invalidates_existing_sessions_and_tokens() {
         .status,
         403
     );
+    // An individually allowed address outside the allowed domains keeps access.
+    let mut config = (*app.config).clone();
+    config.allowed_emails = ["alice@team-ensemble.ch".into()].into_iter().collect();
+    app.config = Arc::new(config);
+    assert_eq!(
+        request(&app, "GET", "/api/me", Value::Null, &h.headers())
+            .await
+            .status,
+        200
+    );
 }
 #[tokio::test]
 async fn newly_reported_ineligible_email_invalidates_old_sessions_and_other_services() {
@@ -4858,7 +4881,7 @@ async fn kchat_without_a_configured_team_exposes_no_data() {
                 "PUBLIC_URL" => Some("https://mcp.example.org"),
                 "CREDENTIAL_ENCRYPTION_KEY" => Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
                 "ALLOWED_EMAIL_DOMAINS" => Some("team-ensemble.ch"),
-                "BIND_ADDR" | "UI_LOCALE" => None,
+                "BIND_ADDR" | "UI_LOCALE" | "ALLOWED_EMAILS" => None,
                 _ => Some("value"),
             }
             .map(String::from)

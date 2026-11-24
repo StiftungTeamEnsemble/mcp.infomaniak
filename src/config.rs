@@ -11,6 +11,8 @@ pub struct Config {
     pub client_id: String,
     pub client_secret: String,
     pub allowed_domains: HashSet<String>,
+    /// Individual lowercase addresses admitted in addition to `allowed_domains`.
+    pub allowed_emails: HashSet<String>,
     pub bind_addr: String,
     /// Optional kChat team name; a lowercase DNS label forming the kChat host.
     pub kchat_team: Option<String>,
@@ -54,21 +56,24 @@ impl Config {
             .split(',')
             .map(|s| s.trim().to_ascii_lowercase())
             .collect::<HashSet<_>>();
-        if allowed_domains.iter().any(|d| {
-            d.is_empty()
-                || !d.contains('.')
-                || d.starts_with('.')
-                || d.ends_with('.')
-                || d.split('.').any(|label| {
-                    label.is_empty()
-                        || label.starts_with('-')
-                        || label.ends_with('-')
-                        || !label
-                            .bytes()
-                            .all(|c| c.is_ascii_alphanumeric() || c == b'-')
-                })
-        }) {
+        if !allowed_domains.iter().all(|d| valid_domain(d)) {
             return Err(Error::config("ALLOWED_EMAIL_DOMAINS"));
+        }
+        let allowed_emails = get("ALLOWED_EMAILS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect::<HashSet<_>>();
+        if !allowed_emails.iter().all(|e| {
+            e.rsplit_once('@').is_some_and(|(local, domain)| {
+                !local.is_empty()
+                    && !local.contains('@')
+                    && !local.chars().any(|c| c.is_whitespace() || c.is_control())
+                    && valid_domain(domain)
+            })
+        }) {
+            return Err(Error::config("ALLOWED_EMAILS"));
         }
         let bind_addr = get("BIND_ADDR").unwrap_or_else(|| "127.0.0.1:3000".into());
         bind_addr
@@ -99,6 +104,7 @@ impl Config {
             client_id: required("INFOMANIAK_CLIENT_ID")?,
             client_secret: required("INFOMANIAK_CLIENT_SECRET")?,
             allowed_domains,
+            allowed_emails,
             bind_addr,
             kchat_team,
             ui_locale,
@@ -112,7 +118,8 @@ impl Config {
         !local.is_empty()
             && !local.contains('@')
             && !email.chars().any(|c| c.is_whitespace() || c.is_control())
-            && self.allowed_domains.contains(&domain.to_ascii_lowercase())
+            && (self.allowed_domains.contains(&domain.to_ascii_lowercase())
+                || self.allowed_emails.contains(&email.to_ascii_lowercase()))
     }
 
     pub fn resource(&self) -> String {
@@ -121,4 +128,16 @@ impl Config {
     pub fn callback(&self) -> String {
         format!("{}/auth/infomaniak/callback", self.public_url)
     }
+}
+
+fn valid_domain(d: &str) -> bool {
+    d.contains('.')
+        && d.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        })
 }
